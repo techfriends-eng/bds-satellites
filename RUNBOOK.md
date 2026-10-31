@@ -42,7 +42,7 @@ flowchart LR
 
 ## 4. Секреты
 
-Список — `site-template/deploy/bds-sat-__SITE__.env.example`: ключ OpenRouter сайта, WP-логин и
+Список — `templates/site/deploy/bds-sat-__SITE__.env.example`: ключ OpenRouter сайта, WP-логин и
 Application Password, `SAT_DB_URL` (sat_writer), `STACKRADAR_RO_URL` (sat_reader). Роли и сеть на auto08 —
 RUNBOOK stack-radar §5.
 

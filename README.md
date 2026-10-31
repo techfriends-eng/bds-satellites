@@ -29,7 +29,7 @@ SAT_SITE_DIR=../bds-sat-kafka SAT_STATE_DIR=/tmp/sat scripts/sat.mjs collect
 | `prompts/` | промпты этапов; сайт дописывает свои в `prompts/site/` своего репо |
 | `visuals/` | форк рендера wiki_visualizer: Dockerfile, конфиги Mermaid |
 | `ops/` | `run-site.sh` (юнит сайта), `deploy-site.sh`, `selfcheck.sh`, `new-site.sh`, `checks.d/` для auto08 |
-| `site-template/` | шаблон тонкого репо сайта |
+| `templates/site/` | шаблон тонкого репо сайта |
 
 - [RUNBOOK.md](RUNBOOK.md) — эксплуатация.
 - [AGENTS.md](AGENTS.md) — правила для ИИ-агентов.

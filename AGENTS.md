@@ -16,7 +16,7 @@ npm run gate
 - Перед новым модулем проверь `@techfriends-eng/toolkit`: ingest, filter, llm, wp, db, config уже там.
   Расширение toolkit — отдельный релиз toolkit с тестами, затем подъём тега здесь.
 - Изменение поведения в том же коммите обновляет CHANGELOG, RUNBOOK и, если затронуто,
-  `site-template/` (тонкие репо сайтов получают это через `ops/new-site.sh` или ручной перенос).
+  `templates/site/` (тонкие репо сайтов получают это через `ops/new-site.sh` или ручной перенос).
 - Секреты — только в `/etc/bds-sat-<site>.env` на progon. В коде — `readSecret`.
 - Релиз: CHANGELOG, `VERSION` и `package.json`, тег `vX.Y.Z`. Сайты поднимают тег сами.
 - Публикация в WP только черновиком (`publish.status: draft`) до решения автора.
