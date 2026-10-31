@@ -1,0 +1,20 @@
+# Недельный прогон __DOMAIN__ (bds-satellites, ADR 0001). Запускается таймером bds-sat-__SITE__.timer.
+[Unit]
+Description=bds-sat-__SITE__: недельный прогон __DOMAIN__
+After=network-online.target docker.service
+Wants=network-online.target
+OnFailure=alert@%n.service
+
+[Service]
+Type=oneshot
+User=bds-sat-__SITE__
+Group=bds-sat-__SITE__
+WorkingDirectory=/opt/bds-sat-__SITE__
+EnvironmentFile=/etc/bds-sat-__SITE__.env
+# lock прогона: сторож простоя progon считает сервер занятым, пока его держит живой процесс.
+RuntimeDirectory=bds-sat-__SITE__
+ExecStart=/opt/bds-sat-__SITE__/node_modules/bds-satellites/ops/run-site.sh
+# Прогон с починкой кода и переписыванием укладывается в 2–3 часа; 8 — с запасом на ожидание памяти.
+TimeoutStartSec=8h
+NoNewPrivileges=true
+PrivateTmp=true

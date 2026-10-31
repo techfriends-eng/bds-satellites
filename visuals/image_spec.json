@@ -1,0 +1,9 @@
+{
+  "final_px": [1200, 800],
+  "draft_px": [512, 341],
+  "final_format": "jpg",
+  "draft_format": "jpg",
+  "final_quality_hint": "high",
+  "draft_quality_hint": "low",
+  "brand_colors": ["#294A70", "#FFAB1F", "#F5F7FA"]
+}

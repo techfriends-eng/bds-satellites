@@ -1,0 +1,49 @@
+# Конфиг __DOMAIN__ для bds-satellites (схема — src/lib/config/site.ts пакета). Ленты и курсы сайта — по списку источников в docs/ приватного репо сайта.
+site: { id: __SITE__, domain: __DOMAIN__ }
+
+topics: []
+
+courses: []
+
+# kind: blog | release | aggregator | youtube; topical — лента целиком по теме; enabled: false — выключен.
+sources: []
+
+select:
+  maxAgeDays: 365
+  keywords: [__SITE__]
+  perRun: 2
+  minRelevance: 7
+  minDepth: 6
+  maxFetches: 4
+
+llm:
+  models:
+    select: anthropic/claude-haiku-5.5
+    plan: anthropic/claude-sonnet-5.5
+    write: anthropic/claude-sonnet-5.5
+    fix: anthropic/claude-sonnet-5.5
+    review: anthropic/claude-sonnet-5.5
+    revise: anthropic/claude-sonnet-5.5
+    image: google/gemini-3-pro-image-preview
+  # У Claude 5 работает только effort (handbook gotchas/llm.md#claude5-reasoning).
+  reasoning:
+    select: { effort: low }
+    plan: { effort: medium }
+    write: { effort: medium }
+    fix: { effort: medium }
+    review: { effort: medium }
+    revise: { effort: medium }
+  maxCostPerRunUsd: 3
+
+stand:
+  base: /var/lib/bds-sat-__SITE__/runs
+  maxFixes: 2
+  images: []
+
+gates: { minWords: 1500, maxWords: 2600, maxShingleShare: 0.15, maxRevisions: 2 }
+
+publish:
+  status: draft
+  categories: []
+
+schedule: { day: __DAY__ }

@@ -1,0 +1,11 @@
+# День — schedule.day в config/site.yaml (обёртка пропускает прогон в чужой день), 02:00 по Москве.
+# Persistent=true: progon включается по расписанию EventBridge, таймер догоняет пропущенный запуск.
+[Unit]
+Description=bds-sat-__SITE__: недельный прогон, __DAY_UC__ 02:00 МСК
+
+[Timer]
+OnCalendar=__DAY_UC__ *-*-* 02:00:00 Europe/Moscow
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,16 @@
+{
+  "name": "bds-sat-__SITE__",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test:unit": "SAT_SITE_DIR=. node node_modules/bds-satellites/dist/cli.js sync --check-config",
+    "gate": "npm run test:unit"
+  },
+  "dependencies": {
+    "bds-satellites": "github:techfriends-eng/bds-satellites#v__PKG_VERSION__"
+  }
+}

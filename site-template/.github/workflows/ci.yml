@@ -1,0 +1,30 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # bds-satellites ставится по тегу из package.json; если пакет приватный, нужен секрет
+      # SATELLITES_READ_TOKEN (fine-grained, read-only contents на techfriends-eng/bds-satellites).
+      - name: доступ к bds-satellites
+        if: ${{ secrets.SATELLITES_READ_TOKEN != '' }}
+        run: git config --global url."https://x-access-token:${{ secrets.SATELLITES_READ_TOKEN }}@github.com/techfriends-eng/bds-satellites".insteadOf "ssh://git@github.com/techfriends-eng/bds-satellites"
+      - run: npm install --no-audit --no-fund
+      - run: npm run gate
+      - name: shellcheck
+        run: |
+          files=$(git ls-files '*.sh' '.githooks/*')
+          [ -z "$files" ] || shellcheck $files
+      # gitleaks-action для репо организации требует платную лицензию — ставим бинарник.
+      - name: gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks git . --redact --verbose --no-banner

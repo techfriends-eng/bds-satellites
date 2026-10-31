@@ -1,0 +1,25 @@
+node_modules/
+.output/
+dist/
+coverage/
+logs/
+state/
+tmp/
+*.log
+
+# секреты никогда не попадают в git (handbook standards/05-config-secrets.md)
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+.ssh/
+
+# копии и бэкапы — история живёт в git
+*.bak
+*.orig
+.DS_Store
+.venv/
+__pycache__/
+*.pyc

@@ -1,0 +1,14 @@
+{
+  "flowchart": {
+    "subGraphTitleMargin": {
+      "top": 15,
+      "bottom": 15
+    }
+  },
+  "themeVariables": {
+    "fontSize": "26px",
+    "secondaryTextColor": "#294A70",
+    "tertiaryTextColor": "#294A70"
+  },
+  "themeCSS": ".edgeLabel, .edgeLabel * { color: #294A70 !important; fill: #294A70 !important; }"
+}

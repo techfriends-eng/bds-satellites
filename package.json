@@ -1,0 +1,49 @@
+{
+  "name": "bds-satellites",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "sat": "dist/cli.js"
+  },
+  "scripts": {
+    "test:unit": "node --experimental-strip-types --no-warnings=ExperimentalWarning --test 'src/**/*.test.ts'",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "sat": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/sat.mjs",
+    "test:lint": "python3 -m unittest discover -s lint/tests",
+    "gate": "npm run test:unit && npm run test:lint && npm run typecheck && npm run lint",
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@techfriends-eng/toolkit": "github:techfriends-eng/toolkit#v0.6.0",
+    "pg": "8.13.1",
+    "yaml": "2.6.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.17.0",
+    "@types/node": "22.10.2",
+    "@types/pg": "8.11.10",
+    "eslint": "9.17.0",
+    "eslint-config-prettier": "9.1.0",
+    "globals": "15.14.0",
+    "prettier": "3.4.2",
+    "typescript": "5.7.2",
+    "typescript-eslint": "8.18.1"
+  },
+  "files": [
+    "dist",
+    "prompts",
+    "style",
+    "lint/sat_lint.py",
+    "lint/wiki_unwrap.py",
+    "visuals",
+    "ops",
+    "VERSION"
+  ]
+}
