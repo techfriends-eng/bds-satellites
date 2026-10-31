@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Первая установка сайта на progon (RUNBOOK §10). Запуск на progon от ubuntu (sudo), из любого места:
 #   scp ops/install-site.sh deploy/* progon:/tmp/bds-sat-__SITE__/ (с wsa100), затем на progon: bash /tmp/bds-sat-__SITE__/install-site.sh
-# Идемпотентно: пользователь в группе docker, read-only deploy keys (репо сайта и, если он приватный,
-# bds-satellites — handbook gotchas/hosting.md#ro-deploy-key), клон в /opt, /var/lib, /etc env из
-# .env.example, юниты, правка сторожа простоя (lock прогона спутника — занятость).
+# Идемпотентно: пользователь в группе docker, read-only deploy key репо сайта (handbook
+# gotchas/hosting.md#ro-deploy-key; пакет bds-satellites публичный, ставится без ключа), клон в /opt,
+# /var/lib, /etc env из .env.example, юниты, правка сторожа простоя (lock прогона спутника — занятость).
 set -euo pipefail
 SITE=__SITE__
 U="bds-sat-$SITE"
@@ -17,8 +17,7 @@ sudo usermod -aG docker "$U"
 sudo install -d -o "$U" -g "$U" -m 750 "$HOME_U" "$HOME_U/runs"
 sudo install -d -o "$U" -g "$U" -m 700 "$HOME_U/.ssh"
 
-# Ключ на репо: GitHub не даёт добавить один deploy key в два репо.
-key() { # имя-алиаса репо
+key() { # алиас ssh, репо
   local alias=$1 repo=$2 file="$HOME_U/.ssh/$1"
   sudo -u "$U" test -e "$file" || sudo -u "$U" ssh-keygen -q -t ed25519 -N '' -C "progon $U $repo" -f "$file"
   if ! sudo -u "$U" grep -q "Host $alias" "$HOME_U/.ssh/config" 2>/dev/null; then
@@ -28,12 +27,6 @@ key() { # имя-алиаса репо
   echo "deploy key $repo (read-only): $(sudo cat "$file.pub")"
 }
 key github-$U "techfriends-eng/$U"
-key github-bds-satellites techfriends-eng/bds-satellites
-# Если bds-satellites приватный, npm берёт его по ssh через ключ этого алиаса.
-for from in "ssh://git@github.com/techfriends-eng/bds-satellites" "https://github.com/techfriends-eng/bds-satellites" \
-            "git@github.com:techfriends-eng/bds-satellites"; do
-  sudo -u "$U" git config --global "url.git@github-bds-satellites:techfriends-eng/bds-satellites.insteadOf" "$from" || true
-done
 sudo -u "$U" ssh-keyscan -q github.com 2>/dev/null | sudo -u "$U" tee "$HOME_U/.ssh/known_hosts" >/dev/null
 
 if [ ! -d "/opt/$U/.git" ]; then
