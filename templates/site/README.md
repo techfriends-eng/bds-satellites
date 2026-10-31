@@ -16,3 +16,4 @@ npm install && npm run gate      # конфиг разбирается
 
 - [RUNBOOK.md](RUNBOOK.md) — эксплуатация сайта; общая часть — RUNBOOK bds-satellites.
 - [AGENTS.md](AGENTS.md) — правила для ИИ-агентов.
+- [docs/adr/](docs/adr/) — решения сайта: деплой по ssh, без typecheck.

@@ -7,10 +7,15 @@
     "node": ">=22"
   },
   "scripts": {
-    "test:unit": "SAT_SITE_DIR=. node node_modules/bds-satellites/dist/cli.js sync --check-config",
-    "gate": "npm run test:unit"
+    "test:unit": "node --test 'tests/**/*.test.mjs'",
+    "lint": "prettier --check .",
+    "gate": "npm run test:unit && npm run lint && SAT_SITE_DIR=. node node_modules/bds-satellites/dist/cli.js sync --check-config"
   },
   "dependencies": {
     "bds-satellites": "github:techfriends-eng/bds-satellites#v__PKG_VERSION__"
+  },
+  "devDependencies": {
+    "prettier": "3.4.2",
+    "yaml": "2.6.1"
   }
 }
