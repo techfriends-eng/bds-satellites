@@ -148,3 +148,9 @@ test("метаданные: отклонения модели — превью �
     prompt: "Photorealistic desk.",
   });
 });
+
+test("VERSION совпадает с package.json: по нему тег образа bds-sat-visuals и строка деплоя", () => {
+  const pkg = join(import.meta.dirname, "../../..");
+  const json = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8")) as { version: string };
+  assert.equal(readFileSync(join(pkg, "VERSION"), "utf8").trim(), json.version);
+});

@@ -8,7 +8,8 @@
 #   2. install-site.sh сайта: пользователь bds-sat-<site>, deploy key, /var/lib, /etc env из примера, юниты, сторож;
 #   3. read-only deploy key добавляется в репо сайта (gh), клон в /opt;
 #   4. секреты из ~/.config/sat/ уходят в /etc/bds-sat-<site>.env через stdin — в выводе их нет;
-#   5. деплой: npm install (пакет по тегу), образ визуализации, selfcheck, smoke (журнал хаба).
+#   5. деплой: npm install (пакет по тегу), образ визуализации, selfcheck, smoke (журнал хаба);
+#   6. запуск таймера.
 # Источник секретов на wsa100 (права 600): <site>-openrouter.env, <site>-wp.env, sat-db.env, stackradar-ro.env.
 set -euo pipefail
 site=${1:?site, например kafka}
@@ -49,4 +50,7 @@ echo "== 4. секреты в /etc/$U.env"
 
 echo "== 5. деплой"
 ssh progon "sudo -u $U -H bash -lc 'cd /opt/$U && node_modules/bds-satellites/ops/deploy-site.sh 2>/dev/null || (npm install --no-audit --no-fund && node_modules/bds-satellites/ops/deploy-site.sh)'"
+echo "== 6. таймер"
+# install-site.sh только включает таймер: без start он ждёт перезагрузки, и прогон в свой день не случится.
+ssh progon "sudo systemctl start $U.timer && systemctl list-timers $U.timer --no-pager | sed -n 2p"
 echo "готово. Полный прогон вручную: RUNBOOK сайта §9 (SAT_FORCE=1)."
