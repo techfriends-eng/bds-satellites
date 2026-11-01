@@ -7,7 +7,7 @@ import { parseSiteConfig } from "../config/site.ts";
 import type { Llm, Stage } from "../llm/client.ts";
 import { openState } from "../store/db.ts";
 import { loadStyle } from "../style/rules.ts";
-import { images, links, uniqueness } from "./checks.ts";
+import { images, links, sourceLinked, uniqueness } from "./checks.ts";
 import { finish, gate, reviseOnce, type GateDeps } from "./run.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..");
@@ -147,4 +147,19 @@ test("доводка: стенд с прошлого раза не прошёл 
   assert.equal(run.ok, true, "стенд прогнан заново");
   assert.ok(readFileSync(join(dir, "s1.html"), "utf8").includes("fixed"));
   assert.ok(!stages.includes("revise"), "потолок правок исчерпан — переписывания нет");
+});
+
+test("ссылки: исходник с utm и слэшем совпадает с чистой ссылкой, 403 робота — не мёртвая", async () => {
+  const src =
+    "https://habr.com/ru/articles/1101266/?utm_campaign=1101266&utm_source=habrahabr&utm_medium=rss";
+  assert.ok(sourceLinked('<a href="https://habr.com/ru/articles/1101266/">x</a>', src));
+  assert.ok(sourceLinked('<a href="https://habr.com/ru/articles/1101266">x</a>', src));
+  assert.ok(!sourceLinked('<a href="https://habr.com/ru/articles/1101267/">x</a>', src));
+  const r = await links(
+    '<a href="https://habr.com/ru/articles/1101266/">и</a><a href="https://medium.com/@a">m</a>',
+    src,
+    "python-school.ru",
+    async (u) => (u.includes("medium") ? 403 : 200),
+  );
+  assert.equal(r.ok, true, r.detail);
 });

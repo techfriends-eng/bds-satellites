@@ -67,6 +67,25 @@ export function images(files: Map<string, string>, cfg: SiteConfig): Check {
 export type Head = (url: string) => Promise<number>;
 
 /** Исходник есть в статье, внешние ссылки живые. */
+// Medium и Cloudflare отвечают роботу 401/403/429 на живую страницу: это не мёртвая ссылка.
+const BOT_BLOCK = new Set([401, 403, 429]);
+
+/** Исходник из RSS приходит с utm_* (Хабр) и хвостовыми слэшами; в статье ссылка обычно чистая. */
+export function sourceLinked(html: string, sourceUrl: string): boolean {
+  const norm = (u: string) => {
+    try {
+      const x = new URL(u.replace(/&amp;/g, "&"));
+      for (const k of [...x.searchParams.keys()]) if (/^utm_/i.test(k)) x.searchParams.delete(k);
+      x.hash = "";
+      return x.toString().replace(/\/+(\?|$)/, "$1");
+    } catch {
+      return u;
+    }
+  };
+  const want = norm(sourceUrl);
+  return [...html.matchAll(/href="([^"]+)"/g)].some((m) => norm(m[1]) === want);
+}
+
 export async function links(
   html: string,
   sourceUrl: string,
@@ -74,12 +93,12 @@ export async function links(
   head: Head,
 ): Promise<Check> {
   const problems: string[] = [];
-  if (!html.includes(sourceUrl)) problems.push("нет ссылки на исходник");
+  if (!sourceLinked(html, sourceUrl)) problems.push("нет ссылки на исходник");
   const urls = [...new Set([...html.matchAll(/href="(https?:\/\/[^"]+)"/g)].map((m) => m[1]))];
   for (const u of urls.filter((x) => !x.includes(domain))) {
     try {
       const status = await head(u);
-      if (status >= 400) problems.push(`${u} → ${status}`);
+      if (status >= 400 && !BOT_BLOCK.has(status)) problems.push(`${u} → ${status}`);
     } catch (err) {
       problems.push(`${u} → ${(err as Error).message.split("\n")[0].slice(0, 60)}`);
     }

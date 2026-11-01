@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readSecret } from "@techfriends-eng/toolkit/config";
 import { fetchText } from "@techfriends-eng/toolkit/ingest";
@@ -43,6 +43,13 @@ export const STEPS = [
 export type Step = (typeof STEPS)[number];
 
 const PKG = process.env.SAT_PKG_DIR ?? join(import.meta.dirname, "..", "..");
+/** Сырые превью модели в корне черновика (до v0.1.16, в т. ч. «.jpg.raw» v0.1.10) линтер считает лишними файлами. */
+function dropStrayPreviews(dir: string): void {
+  for (const f of readdirSync(dir)) {
+    if (/_preview\.jpg\.\w+$/.test(f)) rmSync(join(dir, f), { force: true });
+  }
+}
+
 const VERSION = readFileSync(join(PKG, "VERSION"), "utf8").trim();
 
 type Ctx = {
@@ -172,6 +179,7 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
   async revise(ctx) {
     for (const d of drafts(ctx.db, ["gate_failed"], ctx.ids)) {
       ctx.journal.touch(d.candidate_id);
+      dropStrayPreviews(d.dir);
       try {
         await finish(ctx.gateDeps, d, slugOf(d.dir));
       } catch (err) {
@@ -185,6 +193,7 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
     const apiKey = readSecret("OPENROUTER_API_KEY");
     for (const d of drafts(ctx.db, ["ready", "gate_failed"], ctx.ids)) {
       const slug = slugOf(d.dir);
+      dropStrayPreviews(d.dir);
       const { preview, schemes } = parseVisuals(
         readFileSync(join(d.dir, `${slug}_meta.md`), "utf8"),
       );
@@ -203,7 +212,7 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
             models: [ctx.cfg.llm.models.image, "google/gemini-2.5-flash-image"],
             prompt: preview.prompt,
           });
-          const raw = `${preview.file}.${img.ext}`;
+          const raw = `.work/${preview.file}.${img.ext}`;
           writeFileSync(join(d.dir, raw), img.bytes);
           finalizePreview(dockerCli, image, d.dir, uid, raw, preview.file);
           ctx.db

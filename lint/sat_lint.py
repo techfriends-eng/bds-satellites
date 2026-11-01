@@ -497,7 +497,8 @@ def check_names(slug: str, report: Report) -> None:
         if stem == slug:
             continue
         suffix = stem[len(slug):]
-        if suffix not in ALLOWED_SUFFIXES:
+        # Схемы <slug>_schemeN.jpg рендерятся после первой проверки, доводка их уже видит.
+        if suffix not in ALLOWED_SUFFIXES and not re.fullmatch(r"_scheme\d+", suffix):
             bad.append(name)
     report.check(not bad, "Суффиксы файлов из разрешённого списка", f"{found}", f"лишние: {bad}")
     report.check((ARTICLES / f"{slug}_meta.md").exists(), "Файл метаданных на месте",
