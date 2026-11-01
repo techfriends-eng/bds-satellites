@@ -68,8 +68,12 @@ ssh progon 'sudo -u bds-sat-__SITE__ -H bash -lc "cd /opt/bds-sat-__SITE__ && no
 stand_progon.sh up
 ssh progon 'sudo -u bds-sat-__SITE__ -H bash -lc "set -a; . /etc/bds-sat-__SITE__.env; set +a; /opt/bds-sat-__SITE__/node_modules/bds-satellites/ops/selfcheck.sh"'   # все OK
 ssh progon 'sudo systemctl start bds-sat-__SITE__.service; journalctl -u bds-sat-__SITE__ -n 5 --no-pager'  # не в свой день — «пропуск»
-ssh progon 'sudo -u bds-sat-__SITE__ -H bash -lc "set -a; . /etc/bds-sat-__SITE__.env; set +a; cd /opt/bds-sat-__SITE__; SAT_FORCE=1 node_modules/bds-satellites/ops/run-site.sh"'   # полный прогон, JSON итога в конце
+ssh progon 'sudo systemctl set-environment SAT_FORCE=1 && sudo systemctl start --no-block bds-sat-__SITE__.service && sudo systemctl unset-environment SAT_FORCE'   # полный прогон вне дня
+ssh progon 'systemctl is-active bds-sat-__SITE__; journalctl -u bds-sat-__SITE__ -n 30 --no-pager -o cat'   # inactive — готово, JSON итога в конце
 ```
+
+Полный прогон — только через юнит: lock в `/run/bds-sat-__SITE__/` держит progon включённым. Из ssh напрямую
+`run-site.sh` откажется, иначе сторож простоя выключил бы сервер через 30 минут.
 
 Ожидаемо: в хабе новая строка «Прогоны», статьи в «Спутниках», черновики в WP.
 

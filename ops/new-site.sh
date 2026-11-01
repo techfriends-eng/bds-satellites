@@ -32,4 +32,4 @@ mkdir -p "$dest"
       -e "s/__PKG_VERSION__/$version/g" -e "s/__DATE__/$today/g" "$PKG/templates/site/$rel" > "$out"
   if [ -x "$PKG/templates/site/$rel" ]; then chmod +x "$out"; fi
 done
-echo "готово: $dest (bds-satellites v$version). Дальше: config/site.yaml, npm install, npm run gate, коммит."
+echo "готово: $dest (bds-satellites v$version). Дальше: config/site.yaml, npm install, npx prettier --write ., npm run gate, коммит."

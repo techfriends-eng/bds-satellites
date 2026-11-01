@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Недельный прогон сайта на progon. ExecStart юнита bds-sat-<site>.service (окружение — /etc/bds-sat-<site>.env).
 #   - только в день schedule.day конфига: progon поднимают и для статей блога, а Persistent=true
-#     таймера догоняет пропуск при любом включении (SAT_FORCE=1 — прогон вне дня, вручную);
+#     таймера догоняет пропуск при любом включении (SAT_FORCE=1 — прогон вне дня, вручную через юнит);
 #   - пауза: файл $SAT_STATE_DIR/PAUSE;
 #   - память: чужие контейнеры с лимитами больше 6 ГБ — ждём час, до 3 раз, затем пропуск с записью в журнал;
 #   - lock $RUNTIME_DIRECTORY/run.lock: сторож простоя progon считает сервер занятым, пока lock держит живой процесс.
@@ -21,7 +21,12 @@ if [ -e "$SAT_STATE_DIR/PAUSE" ]; then
   exit 0
 fi
 
-exec 9>"${RUNTIME_DIRECTORY:-/tmp}/run.lock"
+# Вне юнита lock попал бы в /tmp, сторож простоя его не видит и выключает progon посреди прогона.
+if [ -z "${RUNTIME_DIRECTORY:-}" ]; then
+  echo "запуск только через юнит: RUNBOOK сайта §9 (systemctl set-environment SAT_FORCE=1)" >&2
+  exit 2
+fi
+exec 9>"$RUNTIME_DIRECTORY/run.lock"
 flock -n 9 || { echo "прогон уже идёт"; exit 0; }
 
 others_mb() {
