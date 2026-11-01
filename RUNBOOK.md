@@ -91,7 +91,7 @@ SAT_SITE_DIR=../bds-sat-kafka SAT_STATE_DIR=/tmp/sat scripts/sat.mjs collect   #
 
 | Симптом | Причина | Действие |
 |---|---|---|
-| `write: ответ обрезан по maxTokens` | рассуждение Claude 5 без effort | `llm.reasoning` в конфиге сайта; handbook gotchas/llm.md#claude5-reasoning |
+| `write: ответ обрезан по maxTokens` | рассуждение Claude 5 съело ответ | с v0.1.14 потолок 64k; повторяется — `llm.reasoning` в конфиге сайта (effort ниже); handbook gotchas/llm.md#claude5-reasoning |
 | `SyntaxError` разбора JSON | код с ``` внутри ответа | `parseJson` уже это учитывает; если всё равно падает — `.work/` и ответ модели |
 | линтер: «Двоеточия в заголовках», «Тег code» | модель отошла от Style Guide | переписывание закрывает это само; повторяется — правка `prompts/write.md` |
 | превью: «в ответе нет картинки» | модель картинок недоступна | `llm.models.image`, запасная — gemini-2.5-flash-image |

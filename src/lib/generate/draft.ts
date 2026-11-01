@@ -16,6 +16,9 @@ import type { Style } from "../style/rules.ts";
  */
 export const SOURCE_LIMIT = 40_000;
 export const DOC_LIMIT = 30_000;
+// Статья целиком с кодом: рассуждение Sonnet 5.5 на effort medium съедало до 21k из 40k, и статья
+// с большим примером обрывалась (python 1611). Потолок модели — 128k.
+export const ARTICLE_MAX_TOKENS = 64_000;
 
 export type Plan = {
   verdict: "take" | "skip";
@@ -111,7 +114,7 @@ export async function writeDraft(deps: DraftDeps, row: Candidate): Promise<strin
   });
   let answer: string;
   try {
-    answer = await llm.ask("write", w.system, w.user, 40_000, row.id);
+    answer = await llm.ask("write", w.system, w.user, ARTICLE_MAX_TOKENS, row.id);
   } catch (err) {
     // Обрезанный ответ оплачен: сохраняем для разбора, кандидат остаётся picked.
     if (err instanceof Truncated) writeFileSync(join(paths.work, "write.partial.txt"), err.text);

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { outputsOf, parseArticle, setOutputs, splitAnswer } from "../article/html.ts";
-import { draftPaths } from "../generate/draft.ts";
+import { ARTICLE_MAX_TOKENS, draftPaths } from "../generate/draft.ts";
 import { parseJson } from "../llm/client.ts";
 import { render } from "../prompts/render.ts";
 import type { Style } from "../style/rules.ts";
@@ -105,7 +105,9 @@ export async function reviseOnce(deps: GateDeps, draft: Draft, slug: string): Pr
     style_guide: deps.style.styleGuide,
     sat_delta: deps.style.satDelta,
   });
-  const next = splitAnswer(await deps.llm.ask("revise", system, user, 40_000, draft.candidate_id));
+  const next = splitAnswer(
+    await deps.llm.ask("revise", system, user, ARTICLE_MAX_TOKENS, draft.candidate_id),
+  );
   const before = parseArticle(html);
   const after = parseArticle(next.article);
   const sameSet = (a: Iterable<string>, b: Iterable<string>) =>
