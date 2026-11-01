@@ -30,7 +30,7 @@ export type SiteConfig = {
     reasoning: Partial<Record<string, Record<string, unknown>>>;
     maxCostPerRunUsd: number;
   };
-  stand: { base: string; maxFixes: number; images: string[]; memoryLimitMb: number };
+  stand: { base: string; maxFixes: number; images: string[]; memoryLimitMb: number; pyRun: string };
   gates: { minWords: number; maxWords: number; maxShingleShare: number; maxRevisions: number };
   publish: { status: "draft"; categories: number[] };
   schedule: { day: string };
@@ -112,6 +112,7 @@ export function parseSiteConfig(text: string): SiteConfig {
       maxFixes: 2,
       images: [] as string[],
       memoryLimitMb: 6144,
+      pyRun: "",
     }),
     gates: section(raw, "gates", {
       minWords: 1200,

@@ -60,6 +60,7 @@ export async function checkDraft(
       parsed.files,
       outputs,
       deps.exec ?? shellExec,
+      cfg.stand.pyRun,
     );
     log.push({
       attempt,

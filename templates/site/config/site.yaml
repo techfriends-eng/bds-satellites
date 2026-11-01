@@ -39,6 +39,7 @@ stand:
   base: /var/lib/bds-sat-__SITE__/runs
   maxFixes: 2
   images: []
+  # pyRun: "docker compose exec -T <сервис> python3 /work/{file}"   # *.py в контейнере, если на хосте нет рантайма
 
 gates: { minWords: 1500, maxWords: 2600, maxShingleShare: 0.15, maxRevisions: 2 }
 

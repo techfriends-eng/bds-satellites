@@ -67,3 +67,12 @@ test("правила: из форка берутся Style Guide и B5, дель
   assert.ok(!style.styleGuide.includes("## B6."));
   assert.match(style.satDelta, /Баннеров `\[cbanner\]`/);
 });
+
+test("разбор: у run.sh с shebang имя во второй строке, починка находит тот же блок", () => {
+  const html = `<pre class="EnlighterJSRAW" data-enlighter-language="bash">#!/usr/bin/env bash
+# run.sh · Spark 4.0.4
+docker compose up -d</pre>`;
+  const { files } = parseArticle(html);
+  assert.deepEqual([...files.keys()], ["run.sh"]);
+  assert.match(setFile(html, "run.sh", "#!/usr/bin/env bash\n# run.sh\necho ok"), /echo ok/);
+});

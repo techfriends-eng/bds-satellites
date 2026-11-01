@@ -28,6 +28,12 @@ export function escapeHtml(s: string): string {
 
 export type Parsed = { files: Map<string, string>; outputs: string[] };
 
+/** Имя файла из первой строки-комментария; после shebang `#!` — из второй (run.sh модели так и пишет). */
+function fileName(body: string): string | undefined {
+  const [first, second = ""] = body.split("\n", 2);
+  return (first.startsWith("#!") ? second : first).match(FILE_COMMENT)?.[1];
+}
+
 /** Файлы и места вывода по порядку. Повтор имени файла — последний блок. */
 export function parseArticle(html: string): Parsed {
   const files = new Map<string, string>();
@@ -46,7 +52,7 @@ export function parseArticle(html: string): Parsed {
       if (!outputs.includes(out[1])) outputs.push(out[1]);
       continue;
     }
-    const name = body.split("\n", 1)[0].match(FILE_COMMENT)?.[1];
+    const name = fileName(body);
     if (name) files.set(name, body.endsWith("\n") ? body : `${body}\n`);
   }
   return { files, outputs };
@@ -93,8 +99,7 @@ export function outputsOf(html: string): Record<string, string> {
 /** Подменяет код файла (починка после падения прогона): блок с тем же именем в первой строке. */
 export function setFile(html: string, name: string, body: string): string {
   return html.replace(PRE, (whole, lang: string, raw: string) => {
-    const first = unescapeHtml(raw).split("\n", 1)[0].match(FILE_COMMENT)?.[1];
-    if (first !== name) return whole;
+    if (fileName(unescapeHtml(raw)) !== name) return whole;
     return `<pre class="EnlighterJSRAW" data-enlighter-language="${lang}">${escapeHtml(body.replace(/\n+$/, ""))}</pre>`;
   });
 }

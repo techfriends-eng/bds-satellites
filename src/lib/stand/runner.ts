@@ -44,8 +44,10 @@ export const shellExec: Exec = (cmd, cwd, env, timeoutMs) => {
   };
 };
 
-export function commandFor(name: string, work: string): string {
+/** pyRun — команда сайта для *.py с {file} (Spark: spark-submit в контейнере, Java на хосте нет). */
+export function commandFor(name: string, work: string, pyRun = ""): string {
   if (name.endsWith(".sh")) return `bash ${name}`;
+  if (name.endsWith(".py") && pyRun) return pyRun.replaceAll("{file}", name);
   if (name.endsWith(".py")) {
     const py = existsSync(join(work, ".venv", "bin", "python")) ? ".venv/bin/python" : "python3";
     return `${py} ${name}`;
@@ -63,6 +65,7 @@ export function runStand(
   files: Map<string, string>,
   outputs: string[],
   exec: Exec = shellExec,
+  pyRun = "",
 ): RunResults {
   rmSync(work, { recursive: true, force: true });
   mkdirSync(work, { recursive: true });
@@ -75,7 +78,7 @@ export function runStand(
   try {
     for (const name of ["run.sh", ...outputs.filter((n) => n !== "run.sh")]) {
       results[name] = exec(
-        commandFor(name, work),
+        commandFor(name, work, pyRun),
         work,
         env,
         TIMEOUT_MS[name] ?? DEFAULT_TIMEOUT_MS,

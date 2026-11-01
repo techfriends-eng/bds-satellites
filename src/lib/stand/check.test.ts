@@ -7,7 +7,7 @@ import { parseSiteConfig } from "../config/site.ts";
 import type { Llm } from "../llm/client.ts";
 import { openState } from "../store/db.ts";
 import { checkDraft } from "./check.ts";
-import { runStand, shellExec, type Exec } from "./runner.ts";
+import { commandFor, runStand, shellExec, type Exec } from "./runner.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..");
 const pre = (lang: string, body: string) =>
@@ -101,4 +101,14 @@ test("прогон: починки кончились — run_failed, вывод
   assert.ok(readFileSync(join(dir, "s1.html"), "utf8").includes("[[output run.sh]]"));
   const st = db.prepare("SELECT status FROM candidates WHERE id = 5").get() as { status: string };
   assert.equal(st.status, "run_failed");
+});
+
+test("раннер: *.py командой сайта stand.pyRun, без неё — .venv или python3", () => {
+  const work = mkdtempSync(join(tmpdir(), "stand-"));
+  assert.equal(
+    commandFor("t.py", work, "docker compose exec -T spark spark-submit /work/{file}"),
+    "docker compose exec -T spark spark-submit /work/t.py",
+  );
+  assert.equal(commandFor("t.py", work), "python3 t.py");
+  assert.equal(commandFor("run.sh", work, "x {file}"), "bash run.sh");
 });

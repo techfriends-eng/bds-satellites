@@ -28,6 +28,9 @@ export function render(
     topics: cfg.topics.map((t) => `- ${t}`).join("\n"),
     courses: cfg.courses.map((c) => `- ${c.title} — https://${cfg.domain}${c.path}`).join("\n"),
     images: cfg.stand.images.join(", ") || "нет",
+    py_run: cfg.stand.pyRun
+      ? cfg.stand.pyRun.replaceAll("{file}", "ФАЙЛ")
+      : ".venv/bin/python ФАЙЛ (python3, если .venv нет)",
     ...fields,
   };
   // Один проход по шаблону: {{ и }} — буквальные скобки, {поле} — подстановка. Значения уже не
