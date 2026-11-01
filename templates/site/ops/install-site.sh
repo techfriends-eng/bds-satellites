@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Первая установка сайта на progon (RUNBOOK §10). Запуск на progon от ubuntu (sudo), из любого места:
 #   scp ops/install-site.sh deploy/* progon:/tmp/bds-sat-__SITE__/ (с wsa100), затем на progon: bash /tmp/bds-sat-__SITE__/install-site.sh
-# Идемпотентно: пользователь в группе docker, read-only deploy key репо сайта (handbook
+# Идемпотентно: Node 22 (NodeSource), пользователь в группе docker, read-only deploy key репо сайта (handbook
 # gotchas/hosting.md#ro-deploy-key; пакет bds-satellites публичный, ставится без ключа), клон в /opt,
 # /var/lib, /etc env из .env.example, юниты, правка сторожа простоя (lock прогона спутника — занятость).
 set -euo pipefail
@@ -11,6 +11,16 @@ HOME_U="/var/lib/$U"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # Юниты и env.example — в ../deploy клона или рядом со скриптом (копия в /tmp при первой установке).
 DEP="$HERE/../deploy"; [ -d "$DEP" ] || DEP="$HERE"
+
+# Node 22+ (node:sqlite) из репозитория NodeSource, как на auto08: в Ubuntu 24.04 только Node 18.
+if ! node -v 2>/dev/null | grep -qE '^v(2[2-9]|[3-9][0-9])\.'; then
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo gpg --dearmor --yes -o /usr/share/keyrings/nodesource.gpg
+  printf 'Types: deb\nURIs: https://deb.nodesource.com/node_22.x\nSuites: nodistro\nComponents: main\nArchitectures: amd64\nSigned-By: /usr/share/keyrings/nodesource.gpg\n' \
+    | sudo tee /etc/apt/sources.list.d/nodesource.sources >/dev/null
+  sudo apt-get update -qq
+  sudo apt-get install -y -qq nodejs
+fi
+node -v
 
 id "$U" >/dev/null 2>&1 || sudo useradd --system --create-home --home-dir "$HOME_U" --shell /bin/bash "$U"
 sudo usermod -aG docker "$U"
