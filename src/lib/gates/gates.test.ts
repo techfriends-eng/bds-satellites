@@ -8,7 +8,7 @@ import type { Llm, Stage } from "../llm/client.ts";
 import { openState } from "../store/db.ts";
 import { loadStyle } from "../style/rules.ts";
 import { images, links, uniqueness } from "./checks.ts";
-import { gate, reviseOnce, type GateDeps } from "./run.ts";
+import { finish, gate, reviseOnce, type GateDeps } from "./run.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..");
 const cfg = parseSiteConfig(
@@ -117,4 +117,34 @@ test("правка: вывод возвращается настоящий, см
   assert.ok(out.startsWith("<p>b</p>"));
   const code = fake.replace("echo real", "echo new");
   assert.equal(await reviseOnce(deps(db, { revise: code }), { candidate_id: 5, dir }, "s1"), true);
+});
+
+test("доводка: стенд с прошлого раза не прошёл — прогон заново до правки; потолок правок за все прогоны", async () => {
+  const html = `<p>KRaft — лид <a href="https://src/a">исходник</a></p>\n${pre("bash", "# run.sh\necho fixed")}\n${pre("generic", "[[output run.sh]]")}`;
+  const { db, dir } = setup(html);
+  writeFileSync(
+    join(dir, ".work", "run.json"),
+    JSON.stringify({ ok: false, log: [], results: {} }),
+  );
+  const stages: string[] = [];
+  const d = deps(db, {});
+  d.cfg = parseSiteConfig(
+    `site: {id: kafka, domain: kafka-school.ru}\nselect: {keywords: [kafka]}\nstand: {base: ${join(dir, "runs")}}\n`,
+  );
+  d.llm = {
+    spent: () => 0,
+    ask: async (stage) => (
+      stages.push(stage),
+      stage === "review" ? '{"issues": [{"severity": "high", "quote": "q", "problem": "p"}]}' : ""
+    ),
+  };
+  const add = db.prepare(
+    "INSERT INTO llm_calls (at, stage, model, candidate_id, cost_usd) VALUES ('x', 'revise', 'm', 5, 0)",
+  );
+  for (let i = 0; i < cfg.gates.maxRevisionsTotal; i++) add.run();
+  assert.equal(await finish(d, { candidate_id: 5, dir }, "s1"), false);
+  const run = JSON.parse(readFileSync(join(dir, ".work", "run.json"), "utf8"));
+  assert.equal(run.ok, true, "стенд прогнан заново");
+  assert.ok(readFileSync(join(dir, "s1.html"), "utf8").includes("fixed"));
+  assert.ok(!stages.includes("revise"), "потолок правок исчерпан — переписывания нет");
 });

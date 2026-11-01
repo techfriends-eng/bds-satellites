@@ -31,7 +31,13 @@ export type SiteConfig = {
     maxCostPerRunUsd: number;
   };
   stand: { base: string; maxFixes: number; images: string[]; memoryLimitMb: number; pyRun: string };
-  gates: { minWords: number; maxWords: number; maxShingleShare: number; maxRevisions: number };
+  gates: {
+    minWords: number;
+    maxWords: number;
+    maxShingleShare: number;
+    maxRevisions: number;
+    maxRevisionsTotal: number;
+  };
   publish: { status: "draft"; categories: number[] };
   schedule: { day: string };
   bdsBase: string;
@@ -119,6 +125,7 @@ export function parseSiteConfig(text: string): SiteConfig {
       maxWords: 2600,
       maxShingleShare: 0.15,
       maxRevisions: 2,
+      maxRevisionsTotal: 4,
     }),
     publish,
     schedule: section(raw, "schedule", { day: "mon" }),

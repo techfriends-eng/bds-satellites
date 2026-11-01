@@ -124,9 +124,36 @@ export async function reviseOnce(deps: GateDeps, draft: Draft, slug: string): Pr
   return [...before.files].some(([n, b]) => after.files.get(n) !== b);
 }
 
-/** До gates.maxRevisions кругов «переписать → (прогон) → проверки». true — статья прошла. */
+function standOk(dir: string): boolean {
+  const p = join(dir, ".work", "run.json");
+  return existsSync(p) && (JSON.parse(readFileSync(p, "utf8")) as { ok?: boolean }).ok === true;
+}
+
+/** Переписывания черновика за все прогоны: без потолка gate_failed переписывался бы каждую неделю. */
+function revisionsDone(deps: GateDeps, id: number): number {
+  return (
+    deps.db
+      .prepare("SELECT count(*) AS n FROM llm_calls WHERE stage = 'revise' AND candidate_id = ?")
+      .get(id) as { n: number }
+  ).n;
+}
+
+/**
+ * До gates.maxRevisions кругов «переписать → (прогон) → проверки» за прогон и не больше
+ * gates.maxRevisionsTotal за все прогоны. true — статья прошла.
+ */
 export async function finish(deps: GateDeps, draft: Draft, slug: string): Promise<boolean> {
-  for (let i = 0; i < deps.cfg.gates.maxRevisions; i++) {
+  // Код не прошёл стенд в прошлый раз: стенд могли починить с тех пор, а правка текста его не перезапустит.
+  if (!standOk(draft.dir)) {
+    if (!(await checkDraft(deps, draft, slug))) return false;
+    if ((await gate(deps, draft, slug)).ok) return true;
+  }
+  for (
+    let i = 0;
+    i < deps.cfg.gates.maxRevisions &&
+    revisionsDone(deps, draft.candidate_id) < deps.cfg.gates.maxRevisionsTotal;
+    i++
+  ) {
     if (await reviseOnce(deps, draft, slug)) {
       if (!(await checkDraft(deps, draft, slug))) return false;
     }
