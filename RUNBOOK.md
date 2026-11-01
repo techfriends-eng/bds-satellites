@@ -83,7 +83,9 @@ SAT_SITE_DIR=../bds-sat-kafka SAT_STATE_DIR=/tmp/sat scripts/sat.mjs collect   #
 ## 10. Новый хост
 
 Пакет на хост не ставится отдельно: его ставит `npm install` сайта. Нужны Node 22, python3, Docker, git;
-образ визуализации собирает `deploy-site.sh`. Сайт — `ops/install-site.sh` из его репо.
+образ визуализации собирает `deploy-site.sh`. Первая установка сайта — одной командой автора на wsa100:
+`ops/bootstrap-site.sh <site>` (progon, установщик сайта, deploy key, секреты из `~/.config/sat/` через stdin,
+деплой). Мне эти шаги классификатор не даёт: создание пользователей, `sudo` и секреты на хосте.
 
 ## 11. Аварии
 
