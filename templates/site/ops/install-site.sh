@@ -24,10 +24,24 @@ key() { # алиас ssh, репо
     printf 'Host %s\n  HostName github.com\n  User git\n  IdentityFile %s\n  IdentitiesOnly yes\n' "$alias" "$file" \
       | sudo -u "$U" tee -a "$HOME_U/.ssh/config" >/dev/null
   fi
+  sudo chmod 600 "$HOME_U/.ssh/config" # ssh отвергает config, доступный группе на запись
   echo "deploy key $repo (read-only): $(sudo cat "$file.pub")"
 }
 key github-$U "techfriends-eng/$U"
-sudo -u "$U" ssh-keyscan -q github.com 2>/dev/null | sudo -u "$U" tee "$HOME_U/.ssh/known_hosts" >/dev/null
+# Ключ хоста GitHub: keyscan с повторами и сверка с опубликованным отпечатком (docs.github.com,
+# «GitHub's SSH key fingerprints»). Пустой ответ — ошибка: молча пустой known_hosts давал
+# «Host key verification failed» на клоне (первая установка kafka, 2026-11-01).
+GITHUB_ED25519=SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU
+hostkey=""
+for _ in 1 2 3; do
+  hostkey=$(ssh-keyscan -t ed25519 github.com 2>/dev/null | grep -v '^#' || true)
+  [ -n "$hostkey" ] && break
+  sleep 5
+done
+[ -n "$hostkey" ] || { echo "ssh-keyscan github.com не ответил — проверь сеть progon" >&2; exit 1; }
+fp=$(ssh-keygen -lf - <<<"$hostkey" | awk '{print $2}')
+[ "$fp" = "$GITHUB_ED25519" ] || { echo "отпечаток github.com $fp не совпал с опубликованным" >&2; exit 1; }
+echo "$hostkey" | sudo -u "$U" tee "$HOME_U/.ssh/known_hosts" >/dev/null
 
 if [ ! -d "/opt/$U/.git" ]; then
   sudo install -d -o "$U" -g "$U" -m 755 "/opt/$U"
