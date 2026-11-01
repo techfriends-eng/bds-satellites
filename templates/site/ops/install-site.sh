@@ -71,6 +71,14 @@ if [ -f "$IDLE" ] && ! grep -q '/run/bds-sat-' "$IDLE"; then
   sudo cp -p "$IDLE" "$IDLE.pre-bds-sat"
   sudo sed -i 's#^  pgrep -f#  for f in /run/bds-sat-*/run.lock; do [ -e "$f" ] \&\& ! flock -n "$f" true \&\& return 0; done\n  pgrep -f#' "$IDLE"
 fi
+# unattended-upgrades при загрузке обновляет библиотеки, needrestart перезапускает задетые сервисы — и прогон
+# посреди работы. После перезапуска не в свой день он выходит с «пропуск», прогон теряется.
+NR=/etc/needrestart/conf.d/bds-sat.conf
+if [ -d /etc/needrestart/conf.d ] && [ ! -f "$NR" ]; then
+  # shellcheck disable=SC2016 # $nrconf — текст конфига Perl, не переменная
+  printf '%s\n' '# bds-sat-*: needrestart не перезапускает прогоны спутников (bds-satellites RUNBOOK §11).' \
+    '$nrconf{override_rc}{qr(^bds-sat-.*\.service$)} = 0;' | sudo install -m 644 /dev/stdin "$NR"
+fi
 sudo systemctl daemon-reload
 sudo systemctl enable "$U.timer"
 echo "дальше: /etc/$U.env → деплой (RUNBOOK §6) → sudo systemctl start $U.timer"
