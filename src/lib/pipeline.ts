@@ -203,7 +203,7 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
             models: [ctx.cfg.llm.models.image, "google/gemini-2.5-flash-image"],
             prompt: preview.prompt,
           });
-          const raw = `${preview.file}.raw`;
+          const raw = `${preview.file}.${img.ext}`;
           writeFileSync(join(d.dir, raw), img.bytes);
           finalizePreview(dockerCli, image, d.dir, uid, raw, preview.file);
           ctx.db

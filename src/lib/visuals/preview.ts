@@ -5,7 +5,7 @@ import { OPENROUTER } from "../llm/client.ts";
  * запасная — маршрут fallback OpenRouter, как в wiki_visualizer (scripts/lib/openrouter_image.sh).
  * Ответ — data URI в choices[0].message.images[0].image_url.url.
  */
-export type PreviewResult = { bytes: Buffer; model: string; costUsd: number };
+export type PreviewResult = { bytes: Buffer; ext: string; model: string; costUsd: number };
 
 export async function generatePreview(opts: {
   apiKey: string;
@@ -41,10 +41,13 @@ export async function generatePreview(opts: {
     choices?: { message?: { images?: { image_url?: { url?: string } }[] } }[];
   };
   const url = body.choices?.[0]?.message?.images?.[0]?.image_url?.url ?? "";
+  const mime = /^data:image\/([a-zA-Z]+);base64,/.exec(url);
   const b64 = url.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
   if (!b64) throw new Error(`превью: в ответе нет картинки (${text.slice(0, 200)})`);
   return {
     bytes: Buffer.from(b64, "base64"),
+    // Расширение из MIME: по «.raw» ImageMagick берёт камерный RAW и зовёт ufraw-batch, которого нет.
+    ext: (mime?.[1] ?? "png").toLowerCase(),
     model: body.model ?? "",
     costUsd: body.usage?.cost ?? 0,
   };

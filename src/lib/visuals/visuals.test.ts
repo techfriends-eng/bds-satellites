@@ -131,6 +131,7 @@ test("превью: запасная модель маршрутом fallback, �
   }) as unknown as typeof fetch;
   const r = await generatePreview({ apiKey: "k", models: ["a", "b"], prompt: "p", fetch: fake });
   assert.equal(r.bytes.toString(), "PNG");
+  assert.equal(r.ext, "png");
   assert.equal(r.costUsd, 0.04);
   assert.deepEqual(sent.models, ["a", "b"]);
   assert.equal(sent.route, "fallback");
