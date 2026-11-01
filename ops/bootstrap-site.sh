@@ -35,13 +35,17 @@ fi
 
 echo "== 4. секреты в /etc/$U.env"
 # Пути — из примера репо сайта, секреты — из файлов wsa100. Файл пишется целиком через stdin, 640 root:$U.
+# Значения в двойных кавычках: пароль приложения WordPress — группы через пробел, без кавычек bash при
+# source принимал хвост пароля за команду (systemd кавычки снимает сам). Символов " и $ в секретах нет
+# (handbook standards/05).
 {
   grep -E '^(SAT_SITE_DIR|SAT_STATE_DIR|SAT_STAND_BASE|NODE_OPTIONS)=' "$SITE_DIR/deploy/$U.env.example"
   grep -h '^OPENROUTER_API_KEY=' "$CFG/$site-openrouter.env"
   grep -hE '^WP_(URL|USER|APP_PASSWORD)=' "$CFG/$site-wp.env"
   grep -h '^SAT_DB_URL=' "$CFG/sat-db.env"
   grep -h '^STACKRADAR_RO_URL=' "$CFG/stackradar-ro.env"
-} | ssh progon "sudo install -m 640 -o root -g $U /dev/stdin /etc/$U.env && sudo grep -c = /etc/$U.env | sed 's/^/переменных: /'"
+} | sed -E 's/^([A-Z_]+)="?([^"]*)"?$/\1="\2"/' \
+  | ssh progon "sudo install -m 640 -o root -g $U /dev/stdin /etc/$U.env && sudo grep -c = /etc/$U.env | sed 's/^/переменных: /'"
 
 echo "== 5. деплой"
 ssh progon "sudo -u $U -H bash -lc 'cd /opt/$U && node_modules/bds-satellites/ops/deploy-site.sh 2>/dev/null || (npm install --no-audit --no-fund && node_modules/bds-satellites/ops/deploy-site.sh)'"
