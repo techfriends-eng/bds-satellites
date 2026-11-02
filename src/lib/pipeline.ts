@@ -21,7 +21,9 @@ import { collect } from "./sources/collect.ts";
 import { checkDraft } from "./stand/check.ts";
 import { CANDIDATE_COLS, openState, type Db } from "./store/db.ts";
 import { loadStyle } from "./style/rules.ts";
+import { parse } from "yaml";
 import { brandPreviewPrompt } from "./brand/brand.ts";
+import { brandYaml, checkBrand, fetchSiteColors, suggestBrand } from "./brand/homepage.ts";
 import { parseVisuals } from "./visuals/meta.ts";
 import { generatePreview, PreviewFailed } from "./visuals/preview.ts";
 import { dockerCli, finalizePreview, renderScheme } from "./visuals/render.ts";
@@ -341,8 +343,45 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
   },
 };
 
+/** Предложение палитры: `--domain` у нового сайта, конфига которого ещё нет в разборе. */
+async function brandSuggest(rest: string[]): Promise<number> {
+  const at = rest.indexOf("--domain");
+  const domain =
+    at >= 0
+      ? rest[at + 1]
+      : (
+          parse(
+            readFileSync(
+              join(process.env.SAT_SITE_DIR ?? process.cwd(), "config", "site.yaml"),
+              "utf8",
+            ),
+          ) as { site?: { domain?: string } }
+        ).site?.domain;
+  if (!domain) throw new Error("brand-suggest: нужен --domain или site.domain в конфиге");
+  const brand = suggestBrand(await fetchSiteColors(domain));
+  if (!brand) {
+    console.error(`${domain}: на главной нет цветов с оттенком, палитру задаёт автор`);
+    return 1;
+  }
+  console.log(brandYaml(brand));
+  return 0;
+}
+
+/** Сверка brand с главной страницей сайта. Выход 0 — сходится, 1 — нет или страница недоступна. */
+async function brandCheck(): Promise<number> {
+  const cfg = loadSiteConfig(
+    join(process.env.SAT_SITE_DIR ?? process.cwd(), "config", "site.yaml"),
+  );
+  const res = checkBrand(cfg.brand, await fetchSiteColors(cfg.domain));
+  console.log(`главная ${cfg.domain}: ${res.site.map((c) => c.hex).join(" ") || "цветов нет"}`);
+  for (const p of res.problems) console.error(p);
+  return res.ok ? 0 : 1;
+}
+
 export async function main(argv: string[]): Promise<number> {
   const [command = "run", ...rest] = argv;
+  if (command === "brand-suggest") return brandSuggest(rest);
+  if (command === "brand-check") return brandCheck();
   if (rest.includes("--check-config")) {
     loadSiteConfig(join(process.env.SAT_SITE_DIR ?? process.cwd(), "config", "site.yaml"));
     return 0; // selfcheck: конфиг сайта разбирается
@@ -369,7 +408,9 @@ export async function main(argv: string[]): Promise<number> {
           ? [command as Step]
           : [];
   if (!steps.length && command !== "sync") {
-    console.error(`sat: неизвестная команда ${command}; есть run, sync, note, ${STEPS.join(", ")}`);
+    console.error(
+      `sat: неизвестная команда ${command}; есть run, sync, note, brand-check, brand-suggest, ${STEPS.join(", ")}`,
+    );
     return 2;
   }
   const llm = createLlm(

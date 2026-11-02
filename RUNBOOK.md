@@ -111,6 +111,8 @@ SAT_SITE_DIR=../bds-sat-kafka SAT_STATE_DIR=/tmp/sat scripts/sat.mjs collect   #
 | прогон убит `status=15/TERM`, следом «пропуск» | unattended-upgrades + needrestart перезапустили юнит | `/etc/needrestart/conf.d/bds-sat.conf` ставит установщик сайта с v0.1.10; повторить §9 сайта |
 | в `fetchLog` «адрес вне разделов документации», `docs` в промпте «(нет)» | модель назвала страницу вне `docs` в `site.yaml`, нужной страницы нет в списке | добавить страницу или раздел в `docs`, проверить чтением (её текст, а не оглавление) |
 | кандидаты уходят в `unreadable` | сайт закрыт роботу, r.jina.ai ограничил анонимный доступ | §5, текст от автора; цепочка — `.work/research.json`, `fetchLog` |
+| `brand обязателен`, `brand: … цвет палитры bigdataschool.ru` при запуске или в гейте сайта | блок `brand` не заполнен или в нём цвет BDS | `sat brand-suggest` печатает предложение, автор подтверждает, блок в `config/site.yaml` |
+| selfcheck: FAIL `brand сходится с главной сайта` | сайт сменил стиль, палитра с другим оттенком или главная недоступна | `sat brand-check` печатает цвета главной и причину, поправить `brand`; уже готовые картинки сами не обновятся |
 | `журнал: не записан` | sat на auto08 недоступна | статьи не теряются, `sat sync` после восстановления |
 
 ## 12. Шпаргалка
@@ -120,4 +122,7 @@ npm run gate                                  # гейт
 ops/new-site.sh python python-school.ru fri ../bds-sat-python   # тонкий репо нового сайта
 scripts/sat.mjs gates 13                      # шаг по одному кандидату (id из state.db)
 scripts/sat.mjs sync                          # переписать журнал хаба по всем черновикам
+scripts/sat.mjs brand-check                   # brand против цветов главной сайта
+scripts/sat.mjs brand-suggest --domain x.ru   # предложение палитры нового сайта
+# brand: { primary: "#RRGGBB", accent: "#RRGGBB", background: "#RRGGBB", text: "#RRGGBB" }
 ```

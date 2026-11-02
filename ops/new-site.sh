@@ -33,3 +33,11 @@ mkdir -p "$dest"
   if [ -x "$PKG/templates/site/$rel" ]; then chmod +x "$out"; fi
 done
 echo "готово: $dest (bds-satellites v$version). Дальше: config/site.yaml, npm install, npx prettier --write ., npm run gate, коммит."
+# Без brand конфиг не разбирается и гейт сайта не проходит: палитру подтверждает автор.
+if ! grep -q '^brand:' "$dest/config/site.yaml"; then
+  echo
+  echo "ВОПРОС АВТОРУ: палитра схем и превью $domain. Подтвердите или поправьте и впишите в config/site.yaml:"
+  if ! node --experimental-strip-types --no-warnings=ExperimentalWarning "$PKG/scripts/sat.mjs" brand-suggest --domain "$domain"; then
+    echo "предложения нет: главная недоступна или без цветов, блок задаётся вручную (RUNBOOK §12)"
+  fi
+fi

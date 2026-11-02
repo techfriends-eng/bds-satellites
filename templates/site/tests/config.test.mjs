@@ -31,3 +31,13 @@ test("модели заданы для всех этапов, публикаци
   }
   assert.equal(raw.publish.status, "draft");
 });
+
+// Полная проверка (контраст, близость к палитре BDS) — sat sync --check-config в гейте и brand-check в selfcheck.
+test("brand заполнен, цвета #RRGGBB, палитры bigdataschool.ru нет", () => {
+  const bds = ["#294A70", "#FFAB1F", "#F5F7FA"];
+  assert.ok(raw.brand, "brand обязателен: предложение даёт sat brand-suggest, подтверждает автор");
+  for (const key of ["primary", "accent", "background", "text"]) {
+    assert.match(raw.brand[key], /^#[0-9a-fA-F]{6}$/, key);
+    assert.ok(!bds.includes(raw.brand[key].toUpperCase()), key);
+  }
+});
