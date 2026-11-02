@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -14,7 +14,7 @@ const ROOT = join(import.meta.dirname, "..", "..", "..");
 const cfg = parseSiteConfig(
   "site: {id: kafka, domain: kafka-school.ru}\nselect: {keywords: [kafka], maxFetches: 3}\n",
 );
-const LONG = `<html><body><article><p>${"Kafka KRaft контроллеры и кворум. ".repeat(40)}</p></article></body></html>`;
+const LONG = `<html><body><article><p>${"Kafka KRaft контроллеры и кворум. ".repeat(80)}</p></article></body></html>`;
 
 function fakeLlm(answers: Partial<Record<Stage, string>>) {
   const asked: { stage: Stage; system: string; user: string }[] = [];
@@ -151,4 +151,55 @@ test("черновик: write упал — следующий прогон бе�
     ["write"],
   );
   assert.ok(!existsSync(join(dir, ".plans", "13.json")));
+});
+
+test("черновик: исходник не прочитан — unreadable, причина с путём, LLM не вызывается", async () => {
+  const db = seed();
+  const dir = mkdtempSync(join(tmpdir(), "sat-"));
+  const { llm, asked } = fakeLlm({});
+  const out = await writeDraft(
+    {
+      db,
+      cfg,
+      llm,
+      style: loadStyle(join(ROOT, "style")),
+      promptDirs: [join(ROOT, "prompts")],
+      draftsDir: dir,
+      manualDir: join(dir, "source-text"),
+      getHtml: async (u) => Promise.reject(new Error(`HTTP 403 ${u}`)),
+    },
+    db.prepare("SELECT * FROM candidates WHERE id = 13").get() as never,
+  );
+  assert.equal(out, null);
+  assert.equal(asked.length, 0);
+  const row = db.prepare("SELECT status, skip_reason FROM candidates WHERE id = 13").get() as {
+    status: string;
+    skip_reason: string;
+  };
+  assert.equal(row.status, "unreadable");
+  assert.ok(row.skip_reason.includes(join(dir, "source-text", "13.md")));
+});
+
+test("черновик: план в кэше построен по анонсу — кэш не используется", async () => {
+  const db = seed();
+  const dir = mkdtempSync(join(tmpdir(), "sat-"));
+  mkdirSync(join(dir, ".plans"));
+  writeFileSync(
+    join(dir, ".plans", "13.json"),
+    JSON.stringify({ source: "анонс", docs: "", fetchLog: "", plan: { verdict: "take" } }),
+  );
+  const { llm, asked } = fakeLlm({ plan: '{"verdict": "skip", "why": "нет"}' });
+  await writeDraft(
+    {
+      db,
+      cfg,
+      llm,
+      style: loadStyle(join(ROOT, "style")),
+      promptDirs: [join(ROOT, "prompts")],
+      draftsDir: dir,
+      getHtml: async () => LONG,
+    },
+    db.prepare("SELECT * FROM candidates WHERE id = 13").get() as never,
+  );
+  assert.equal(asked[0].stage, "plan");
 });

@@ -22,12 +22,12 @@ const MIGRATIONS: string[] = [
      simhash INTEGER,                    -- NULL: текст короткий, сравнение только по URL
      dup_of INTEGER REFERENCES candidates(id),
      bds_post TEXT,
-     skip_reason TEXT,                   -- age | topic | prerelease
+     skip_reason TEXT,                   -- age | topic | prerelease | причина unreadable
      score_relevance INTEGER,
      score_depth INTEGER,
      score_reason TEXT,
      scored_at TEXT,
-     status TEXT NOT NULL DEFAULT 'new'  -- new dup bds radar skip picked rejected drafted ran run_failed gate_failed ready
+     status TEXT NOT NULL DEFAULT 'new'  -- new dup bds radar skip picked unreadable rejected drafted ran run_failed gate_failed ready
    );
    CREATE INDEX candidates_status ON candidates(status);
    CREATE TABLE feed_runs (
@@ -46,6 +46,8 @@ const MIGRATIONS: string[] = [
      created TEXT NOT NULL,
      wp_post_id INTEGER, wp_url TEXT, wp_status TEXT
    );`,
+  // Текст статьи из ленты: summary обрезан до 1200 символов, для черновика этого мало.
+  "ALTER TABLE candidates ADD COLUMN body TEXT NOT NULL DEFAULT ''",
 ];
 
 export type Db = DatabaseSync;
@@ -55,7 +57,7 @@ export type Db = DatabaseSync;
  * («Value is too large»), а SELECT * с ним падает. simhash читает только сбор, через setReadBigInts.
  */
 export const CANDIDATE_COLS =
-  "id, url_hash, url, source_id, kind, title, summary, published, fetched_at, dup_of, bds_post, " +
+  "id, url_hash, url, source_id, kind, title, summary, body, published, fetched_at, dup_of, bds_post, " +
   "skip_reason, score_relevance, score_depth, score_reason, scored_at, status";
 
 export function openState(path: string): Db {

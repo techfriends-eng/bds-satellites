@@ -30,7 +30,7 @@ flowchart LR
 ```
 
 Статусы кандидата: `new → (dup|bds|radar|skip) → picked → drafted → ran|run_failed → ready|gate_failed`
-(`rejected` — план сказал «не брать»).
+(`rejected` — план сказал «не брать»; `unreadable` — текст исходника не получен, см. §5).
 
 ## 3. Карта файлов на хосте
 
@@ -47,6 +47,10 @@ Application Password, `SAT_DB_URL` (sat_writer), `STACKRADAR_RO_URL` (sat_reader
 RUNBOOK stack-radar §5.
 
 ## 5. Данные и БД
+
+Текст от автора: кандидат в статусе `unreadable` (хаб, `sat.runs.stats.need_author_text`, причина в
+`candidates.skip_reason`) ждёт файл `/var/lib/bds-sat-<site>/source-text/<id кандидата>.md`, от 300 слов,
+владелец — пользователь сайта. Следующий шаг `draft` вернёт кандидата в работу.
 
 - `state.db` сайта (SQLite, `node:sqlite`): миграции в `src/lib/state/db.ts`, только добавление.
 - База `sat` на auto08: `sat.articles`, `sat.runs`. Хаб читает через FDW на supan8n.
@@ -101,6 +105,7 @@ SAT_SITE_DIR=../bds-sat-kafka SAT_STATE_DIR=/tmp/sat scripts/sat.mjs collect   #
 | схема не рендерится, Parse error | ошибка Mermaid в метаданных | черновик остаётся с `TODO_IMAGE`, правка в `_meta.md` и `sat visuals <id>` |
 | progon выключился посреди ручного прогона | `run-site.sh` запущен из ssh, lock в `/tmp` | только через юнит, RUNBOOK сайта §9; с v0.1.9 скрипт вне юнита отказывается |
 | прогон убит `status=15/TERM`, следом «пропуск» | unattended-upgrades + needrestart перезапустили юнит | `/etc/needrestart/conf.d/bds-sat.conf` ставит установщик сайта с v0.1.10; повторить §9 сайта |
+| кандидаты уходят в `unreadable` | сайт закрыт роботу, r.jina.ai ограничил анонимный доступ | §5, текст от автора; цепочка — `.work/research.json`, `fetchLog` |
 | `журнал: не записан` | sat на auto08 недоступна | статьи не теряются, `sat sync` после восстановления |
 
 ## 12. Шпаргалка

@@ -10,6 +10,16 @@ export const MIN_TEXT = 300;
 const META_REFRESH =
   /<meta[^>]+http-equiv=["']?refresh["']?[^>]+content=["'][^"']*url=([^"'>\s]+)/i;
 
+/** Запасной читатель: отдаёт страницу текстом, в том числе с JS и там, где роботу закрыто. */
+export const JINA = "https://r.jina.ai/";
+
+/** Ответ r.jina.ai: заголовок служебный, сбой сайта приходит с кодом 200 и предупреждением. */
+export function jinaText(answer: string): string {
+  if (/^Warning: Target URL returned error/m.test(answer)) return "";
+  const body = answer.match(/^Markdown Content:\s*$/m);
+  return body ? answer.slice(body.index! + body[0].length) : answer;
+}
+
 export type GetHtml = (url: string) => Promise<string>;
 export type FetchLogEntry = { url: string; result: string };
 

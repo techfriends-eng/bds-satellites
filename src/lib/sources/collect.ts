@@ -24,8 +24,8 @@ export function storeItems(db: Db, cfg: SiteConfig, src: Source, items: FeedItem
   others.setReadBigInts(true);
   const insert = db.prepare(
     `INSERT OR IGNORE INTO candidates
-       (url_hash, url, source_id, kind, title, summary, published, fetched_at, simhash, dup_of, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (url_hash, url, source_id, kind, title, summary, body, published, fetched_at, simhash, dup_of, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const item of items) {
     if (!item.url) continue;
@@ -48,6 +48,7 @@ export function storeItems(db: Db, cfg: SiteConfig, src: Source, items: FeedItem
       src.kind,
       item.title.trim(),
       summary,
+      item.body,
       item.publishedAt,
       nowIso(),
       fp,

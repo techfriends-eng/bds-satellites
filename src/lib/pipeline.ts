@@ -13,6 +13,7 @@ import { writeDraft, type Candidate } from "./generate/draft.ts";
 import { createJournal, type Journal, type Query } from "./journal/journal.ts";
 import { BudgetExceeded, createLlm, OPENROUTER } from "./llm/client.ts";
 import { publishDraft } from "./publish/wp.ts";
+import { manualPath } from "./research/source.ts";
 import { pick, score } from "./select/rank.ts";
 import { prefilter } from "./select/prefilter.ts";
 import { collect } from "./sources/collect.ts";
@@ -58,8 +59,12 @@ type Ctx = {
   journal: Journal;
   gateDeps: GateDeps;
   draftsDir: string;
+  manualDir: string;
   ids?: number[];
 };
+
+/** Сколько нечитаемых кандидатов заменять за прогон: ниже — следующий прогон. */
+const MAX_UNREADABLE_PER_RUN = 10;
 
 function optionalSecret(name: string): string | null {
   try {
@@ -137,24 +142,53 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
     ctx.journal.stats.picked = pick(ctx.db, ctx.cfg);
   },
   async draft(ctx) {
-    const rows = ctx.db
-      .prepare(`SELECT ${CANDIDATE_COLS} FROM candidates WHERE status = 'picked'`)
-      .all() as Candidate[];
-    for (const row of rows.filter((r) => !ctx.ids?.length || ctx.ids.includes(r.id))) {
-      ctx.journal.touch(row.id);
-      try {
-        await writeDraft(
-          {
-            ...ctx.gateDeps,
-            draftsDir: ctx.draftsDir,
-            getHtml: (u) => fetchText(u, 30_000, 2_000_000),
-          },
-          row,
-        );
-      } catch (err) {
-        errorOf(ctx, "draft", row.id, err); // тема остаётся picked, попадёт в следующий прогон
-      }
+    const { db, cfg, journal, manualDir } = ctx;
+    const status = db.prepare("UPDATE candidates SET status = 'picked' WHERE id = ?");
+    // Автор положил текст: кандидат возвращается в работу.
+    const waiting = db.prepare("SELECT id FROM candidates WHERE status = 'unreadable'").all() as {
+      id: number;
+    }[];
+    for (const { id } of waiting) {
+      if (existsSync(manualPath(manualDir, id))) status.run(id);
     }
+    const needText: { id: number; url: string; file: string }[] = [];
+    const tried = new Set<number>();
+    for (;;) {
+      const rows = (
+        db
+          .prepare(`SELECT ${CANDIDATE_COLS} FROM candidates WHERE status = 'picked'`)
+          .all() as Candidate[]
+      ).filter((r) => !tried.has(r.id) && (!ctx.ids?.length || ctx.ids.includes(r.id)));
+      let unreadable = 0;
+      for (const row of rows) {
+        tried.add(row.id);
+        journal.touch(row.id);
+        try {
+          await writeDraft(
+            {
+              ...ctx.gateDeps,
+              draftsDir: ctx.draftsDir,
+              manualDir,
+              getHtml: (u) => fetchText(u, 60_000, 2_000_000),
+            },
+            row,
+          );
+        } catch (err) {
+          errorOf(ctx, "draft", row.id, err); // тема остаётся picked, попадёт в следующий прогон
+        }
+        const now = db.prepare("SELECT status FROM candidates WHERE id = ?").get(row.id) as {
+          status: string;
+        };
+        if (now.status === "unreadable") {
+          unreadable++;
+          needText.push({ id: row.id, url: row.url, file: manualPath(manualDir, row.id) });
+        }
+      }
+      // Вместо нечитаемого — следующий кандидат. Без замены прогон остался бы без статьи.
+      if (!unreadable || ctx.ids?.length || needText.length >= MAX_UNREADABLE_PER_RUN) break;
+      if (!pick(db, cfg).length) break;
+    }
+    if (needText.length) journal.stats.need_author_text = needText;
   },
   async stand(ctx) {
     for (const d of drafts(ctx.db, ["drafted"], ctx.ids)) {
@@ -282,6 +316,7 @@ export async function main(argv: string[]): Promise<number> {
     journal,
     ids,
     draftsDir: join(stateDir, "drafts"),
+    manualDir: join(stateDir, "source-text"),
     gateDeps: {
       db,
       cfg,

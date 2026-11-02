@@ -61,5 +61,5 @@ test("сбор: повтор не плодит, почти-дубль из др�
 test("состояние: миграции идемпотентны", () => {
   const db = openState(":memory:");
   const n = db.prepare("SELECT count(*) AS n FROM _migrations").get() as { n: number };
-  assert.equal(n.n, 1);
+  assert.equal(n.n, 2);
 });

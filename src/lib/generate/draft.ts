@@ -1,11 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { stripHtml } from "@techfriends-eng/toolkit/ingest";
 import { splitAnswer } from "../article/html.ts";
 import type { SiteConfig } from "../config/site.ts";
 import { parseJson, Truncated, type Llm } from "../llm/client.ts";
 import { render } from "../prompts/render.ts";
 import { createFetcher, formatLog, type GetHtml } from "../research/fetcher.ts";
+import { manualPath, MIN_SOURCE_WORDS, readSource, wordCount } from "../research/source.ts";
 import { nowIso, type Db } from "../store/db.ts";
 import type { Style } from "../style/rules.ts";
 
@@ -14,7 +14,6 @@ import type { Style } from "../style/rules.ts";
  * Каталог черновика <drafts>/<slug>/: <slug>.html, <slug>_meta.md (их читает линтер, имена по B0),
  * служебное — в .work/ (разведка, ответы, журналы прогона и проверок).
  */
-export const SOURCE_LIMIT = 40_000;
 export const DOC_LIMIT = 30_000;
 // Статья целиком с кодом: рассуждение Sonnet 5.5 на effort medium съедало до 21k из 40k, и статья
 // с большим примером обрывалась (python 1611). Потолок модели — 128k.
@@ -35,6 +34,7 @@ export type Candidate = {
   url: string;
   title: string;
   summary: string;
+  body?: string;
   source_id: string;
   published: string | null;
 };
@@ -46,6 +46,8 @@ export type DraftDeps = {
   style: Style;
   promptDirs: string[];
   draftsDir: string;
+  /** Тексты от автора: <manualDir>/<id кандидата>.md (RUNBOOK §5). */
+  manualDir?: string;
   getHtml: GetHtml;
 };
 
@@ -66,14 +68,18 @@ export function draftPaths(dir: string, slug: string) {
   };
 }
 
-export async function sourceText(row: Candidate, fetcher: ReturnType<typeof createFetcher>) {
-  // Агрегаторы отдают в ленте весь текст: в веб за ним не ходим.
-  const feed = stripHtml(row.summary).replace(/\s+/g, " ").trim();
-  if (feed.split(" ").length > 400) return feed.slice(0, SOURCE_LIMIT);
-  return (await fetcher.text(row.url, SOURCE_LIMIT)) ?? feed;
+/** Статус unreadable: что пробовали и куда автору положить текст. Журнал и повтор — в pipeline.ts. */
+function markUnreadable(deps: DraftDeps, row: Candidate, words: number, tried: string): void {
+  const where = deps.manualDir ? manualPath(deps.manualDir, row.id) : "ручной файл";
+  deps.db
+    .prepare("UPDATE candidates SET status = 'unreadable', skip_reason = ? WHERE id = ?")
+    .run(`нужен текст от автора в ${where}; ${words} слов; ${tried}`.slice(0, 500), row.id);
 }
 
-/** Возвращает каталог черновика или null, если план сказал «не брать» (status = rejected). */
+/**
+ * Возвращает каталог черновика или null: план сказал «не брать» (status = rejected) либо текст исходника
+ * получить не удалось (status = unreadable). LLM в последнем случае не вызывается.
+ */
 export async function writeDraft(deps: DraftDeps, row: Candidate): Promise<string | null> {
   const { db, cfg, llm, style, promptDirs } = deps;
   const meta = JSON.stringify({
@@ -84,11 +90,22 @@ export async function writeDraft(deps: DraftDeps, row: Candidate): Promise<strin
   });
   const cachePath = researchCachePath(deps.draftsDir, row.id);
   let research: Research;
-  if (existsSync(cachePath)) {
-    research = JSON.parse(readFileSync(cachePath, "utf8")) as Research;
+  // Кэш до v0.1.18 мог держать план по анонсу из ленты: такой план не годится.
+  const cached = existsSync(cachePath)
+    ? (JSON.parse(readFileSync(cachePath, "utf8")) as Research)
+    : null;
+  if (cached && wordCount(cached.source) >= MIN_SOURCE_WORDS) {
+    research = cached;
   } else {
     const fetcher = createFetcher(cfg.select.maxFetches, deps.getHtml);
-    const source = await sourceText(row, fetcher);
+    const read = await readSource(row, deps);
+    fetcher.log.push(...read.log);
+    if (read.text === null) {
+      markUnreadable(deps, row, read.words, formatLog(read.log).replace(/\n/g, " "));
+      rmSync(cachePath, { force: true });
+      return null;
+    }
+    const source = read.text;
     const p = render(promptDirs, "plan", cfg, { meta, source, sat_delta: style.satDelta });
     const plan = parseJson<Plan>(await llm.ask("plan", p.system, p.user, 8000, row.id));
     if (plan.verdict !== "take") {
