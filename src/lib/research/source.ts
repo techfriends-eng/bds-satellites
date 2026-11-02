@@ -104,7 +104,7 @@ export async function readSource(row: SourceRow, deps: SourceDeps): Promise<Sour
   }
 
   try {
-    const ok = accept(row.url, htmlToArticleText(await deps.getHtml(row.url)));
+    const ok = accept(row.url, htmlToArticleText(await deps.getHtml(row.url), SOURCE_LIMIT));
     if (ok) return ok;
   } catch (err) {
     failed(row.url, err);

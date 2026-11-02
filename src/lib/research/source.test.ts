@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { jinaText } from "./fetcher.ts";
-import { mediumFeedUrl, readSource } from "./source.ts";
+import { mediumFeedUrl, readSource, SOURCE_LIMIT } from "./source.ts";
 
 const WORDS = "Kafka KRaft кворум контроллер метаданные ".repeat(70);
 const page = `<html><body><article><p>${WORDS}</p></article></body></html>`;
@@ -75,4 +75,12 @@ test("чтение: заглушка на 200 не считается текст
 test("чтение: страница с текстом от порога проходит", async () => {
   const r = await readSource(row(), { getHtml: async () => page });
   assert.equal(r.via, "https://site.io/p");
+});
+
+test("чтение: длинная статья с прямого запроса не режется на 24 000 знаков", async () => {
+  const html = `<article>${"слово ".repeat(10_000)}</article>`;
+  const r = await readSource(row({ url: "https://habr.com/ru/articles/1/" }), {
+    getHtml: async () => html,
+  });
+  assert.equal(r.text?.length, SOURCE_LIMIT);
 });
