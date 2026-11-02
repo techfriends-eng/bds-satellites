@@ -113,3 +113,42 @@ test("черновик: план «не брать» — rejected с причи�
   };
   assert.deepEqual({ ...row }, { status: "rejected", score_reason: "план: патч форка" });
 });
+
+test("черновик: write упал — следующий прогон берёт план из кэша, за план не платит", async () => {
+  const db = seed();
+  const dir = mkdtempSync(join(tmpdir(), "sat-"));
+  const plan = JSON.stringify({
+    verdict: "take",
+    why: "ok",
+    slug: "kraft_q",
+    key: "K",
+    title: "t",
+  });
+  const deps = (llm: Llm) => ({
+    db,
+    cfg,
+    llm,
+    style: loadStyle(join(ROOT, "style")),
+    promptDirs: [join(ROOT, "prompts")],
+    draftsDir: dir,
+    getHtml: async () => LONG,
+  });
+  const row = () => db.prepare("SELECT * FROM candidates WHERE id = 13").get() as never;
+  const failing: Llm = {
+    spent: () => 0,
+    ask: async (stage) => {
+      if (stage === "plan") return plan;
+      throw new Error("write: модель не ответила после повторов");
+    },
+  };
+  await assert.rejects(writeDraft(deps(failing), row()), /write/);
+  assert.ok(existsSync(join(dir, ".plans", "13.json")));
+
+  const { llm, asked } = fakeLlm({ write: "=====ARTICLE=====\n<p>K</p>\n=====META=====\n# М\n" });
+  assert.equal(await writeDraft(deps(llm), row()), join(dir, "kraft_q"));
+  assert.deepEqual(
+    asked.map((a) => a.stage),
+    ["write"],
+  );
+  assert.ok(!existsSync(join(dir, ".plans", "13.json")));
+});

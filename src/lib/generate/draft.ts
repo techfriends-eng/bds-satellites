@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripHtml } from "@techfriends-eng/toolkit/ingest";
 import { splitAnswer } from "../article/html.ts";
@@ -49,6 +49,13 @@ export type DraftDeps = {
   getHtml: GetHtml;
 };
 
+type Research = { source: string; docs: string; fetchLog: string; plan: Plan };
+
+/** Разведка с планом до готового черновика: если write упал, следующий прогон не платит за план снова. */
+export function researchCachePath(draftsDir: string, candidateId: number) {
+  return join(draftsDir, ".plans", `${candidateId}.json`);
+}
+
 export function draftPaths(dir: string, slug: string) {
   return {
     dir,
@@ -69,45 +76,50 @@ export async function sourceText(row: Candidate, fetcher: ReturnType<typeof crea
 /** Возвращает каталог черновика или null, если план сказал «не брать» (status = rejected). */
 export async function writeDraft(deps: DraftDeps, row: Candidate): Promise<string | null> {
   const { db, cfg, llm, style, promptDirs } = deps;
-  const fetcher = createFetcher(cfg.select.maxFetches, deps.getHtml);
-  const source = await sourceText(row, fetcher);
   const meta = JSON.stringify({
     title: row.title,
     url: row.url,
     source: row.source_id,
     published: row.published,
   });
-
-  const p = render(promptDirs, "plan", cfg, { meta, source, sat_delta: style.satDelta });
-  const plan = parseJson<Plan>(await llm.ask("plan", p.system, p.user, 8000, row.id));
-  if (plan.verdict !== "take") {
-    db.prepare("UPDATE candidates SET status = 'rejected', score_reason = ? WHERE id = ?").run(
-      `план: ${plan.why ?? ""}`.slice(0, 500),
-      row.id,
-    );
-    return null;
+  const cachePath = researchCachePath(deps.draftsDir, row.id);
+  let research: Research;
+  if (existsSync(cachePath)) {
+    research = JSON.parse(readFileSync(cachePath, "utf8")) as Research;
+  } else {
+    const fetcher = createFetcher(cfg.select.maxFetches, deps.getHtml);
+    const source = await sourceText(row, fetcher);
+    const p = render(promptDirs, "plan", cfg, { meta, source, sat_delta: style.satDelta });
+    const plan = parseJson<Plan>(await llm.ask("plan", p.system, p.user, 8000, row.id));
+    if (plan.verdict !== "take") {
+      db.prepare("UPDATE candidates SET status = 'rejected', score_reason = ? WHERE id = ?").run(
+        `план: ${plan.why ?? ""}`.slice(0, 500),
+        row.id,
+      );
+      return null;
+    }
+    const docs: string[] = [];
+    for (const url of (plan.doc_urls ?? []).slice(0, 3)) {
+      const text = await fetcher.text(url, DOC_LIMIT);
+      if (text) docs.push(`### ${url}\n${text}`);
+    }
+    research = { source, docs: docs.join("\n\n"), fetchLog: formatLog(fetcher.log), plan };
+    mkdirSync(join(deps.draftsDir, ".plans"), { recursive: true });
+    writeFileSync(cachePath, JSON.stringify(research));
   }
+  const { source, docs, fetchLog, plan } = research;
   const slug = /^[a-z0-9_]+$/.test(plan.slug ?? "") ? plan.slug : `sat_${row.id}`;
-  const docs: string[] = [];
-  for (const url of (plan.doc_urls ?? []).slice(0, 3)) {
-    const text = await fetcher.text(url, DOC_LIMIT);
-    if (text) docs.push(`### ${url}\n${text}`);
-  }
-  const fetchLog = formatLog(fetcher.log);
 
   const paths = draftPaths(join(deps.draftsDir, slug), slug);
   mkdirSync(paths.work, { recursive: true });
-  writeFileSync(
-    paths.research,
-    JSON.stringify({ source, docs: docs.join("\n\n"), fetchLog, plan }),
-  );
+  writeFileSync(paths.research, JSON.stringify(research));
 
   const w = render(promptDirs, "write", cfg, {
     slug,
     plan: JSON.stringify(plan, null, 1),
     meta,
     source,
-    docs: docs.join("\n\n") || "(документацию получить не удалось)",
+    docs: docs || "(документацию получить не удалось)",
     fetch_log: fetchLog,
     style_guide: style.styleGuide,
     sat_delta: style.satDelta,
@@ -129,5 +141,6 @@ export async function writeDraft(deps: DraftDeps, row: Candidate): Promise<strin
     nowIso(),
   );
   db.prepare("UPDATE candidates SET status = 'drafted' WHERE id = ?").run(row.id);
+  rmSync(cachePath, { force: true });
   return paths.dir;
 }
