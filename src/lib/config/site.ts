@@ -9,6 +9,8 @@ export type SourceKind = (typeof SOURCE_KINDS)[number];
 
 export type Source = { id: string; kind: SourceKind; title: string; url: string; topical: boolean };
 export type Course = { title: string; path: string };
+/** Раздел официальной документации: версия задана адресом, pages — проверенные пути от base. */
+export type DocSource = { title: string; base: string; pages: string[] };
 
 export type SiteConfig = {
   siteId: string;
@@ -16,6 +18,7 @@ export type SiteConfig = {
   topics: string[];
   courses: Course[];
   sources: Source[];
+  docs: DocSource[];
   collect: { timeoutMs: number; simhashMaxDistance: number; simhashMinWords: number };
   select: {
     maxAgeDays: number;
@@ -57,6 +60,15 @@ function section<T>(raw: Raw, key: string, defaults: T): T {
 /** `~` в путях конфига раскрывается в дом пользователя сайта, который запускает конвейер. */
 export function expandHome(path: string, home = homedir()): string {
   return path.startsWith("~/") ? `${home}${path.slice(1)}` : path;
+}
+
+function parseDocs(raw: Raw): DocSource[] {
+  return ((raw.docs as Partial<DocSource>[] | undefined) ?? []).map((d) => {
+    const base = String(d.base);
+    if (!d.title || !/^https?:\/\/[^/]+\/(.*\/)?$/.test(base))
+      throw new Error(`docs: нужны title и base с «/» на конце (${base})`);
+    return { title: d.title, base, pages: d.pages ?? [] };
+  });
 }
 
 export function parseSiteConfig(text: string): SiteConfig {
@@ -102,6 +114,7 @@ export function parseSiteConfig(text: string): SiteConfig {
     topics: (raw.topics as string[] | undefined) ?? [],
     courses: (raw.courses as Course[] | undefined) ?? [],
     sources,
+    docs: parseDocs(raw),
     collect: section(raw, "collect", {
       timeoutMs: 20_000,
       simhashMaxDistance: 6,

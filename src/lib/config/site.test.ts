@@ -43,3 +43,12 @@ test("~ раскрывается в дом пользователя", () => {
   );
   assert.equal(expandHome("/etc/x.env", "/h"), "/etc/x.env");
 });
+
+test("документация: разделы из конфига, base обязан кончаться на /, без раздела — пустой список", () => {
+  assert.deepEqual(parseSiteConfig(YAML).docs, []);
+  const d = "docs:\n  - { title: Kafka, base: 'https://kafka.apache.org/43/', pages: [apis/] }\n";
+  assert.deepEqual(parseSiteConfig(`${YAML}${d}`).docs, [
+    { title: "Kafka", base: "https://kafka.apache.org/43/", pages: ["apis/"] },
+  ]);
+  assert.throws(() => parseSiteConfig(`${YAML}${d.replace("43/'", "43'")}`), /docs/);
+});

@@ -19,3 +19,18 @@ test("промпт: подстановка, буквальные скобки, �
   );
   assert.equal(user, '[{"a": {"b": 1}}]');
 });
+
+test("промпт плана: адреса документации из конфига", () => {
+  const root = join(import.meta.dirname, "..", "..", "..", "prompts");
+  const withDocs = parseSiteConfig(
+    "site: {id: kafka, domain: kafka-school.ru}\nselect: {keywords: [kafka]}\ndocs:\n  - { title: Kafka 4.3, base: 'https://kafka.apache.org/43/', pages: [apis/, security/] }\n  - { title: Ray, base: 'https://docs.ray.io/en/latest/' }\n",
+  );
+  const fields = { meta: "", source: "", sat_delta: "" };
+  const { system } = render(root, "plan", withDocs, fields);
+  assert.ok(
+    system.includes(
+      "- Kafka 4.3: https://kafka.apache.org/43/apis/, https://kafka.apache.org/43/security/\n- Ray: https://docs.ray.io/en/latest/",
+    ),
+  );
+  assert.ok(render(root, "plan", cfg, fields).system.includes("(не заданы)"));
+});
