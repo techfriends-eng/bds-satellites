@@ -124,7 +124,7 @@ export async function writeDraft(deps: DraftDeps, row: Candidate): Promise<strin
     mkdirSync(join(deps.draftsDir, ".plans"), { recursive: true });
     writeFileSync(cachePath, JSON.stringify(research));
   }
-  const { source, docs, fetchLog, plan } = research;
+  const { source, docs, plan } = research;
   const slug = /^[a-z0-9_]+$/.test(plan.slug ?? "") ? plan.slug : `sat_${row.id}`;
 
   const paths = draftPaths(join(deps.draftsDir, slug), slug);
@@ -136,8 +136,7 @@ export async function writeDraft(deps: DraftDeps, row: Candidate): Promise<strin
     plan: JSON.stringify(plan, null, 1),
     meta,
     source,
-    docs: docs || "(документацию получить не удалось)",
-    fetch_log: fetchLog,
+    docs: docs || "(нет)",
     style_guide: style.styleGuide,
     sat_delta: style.satDelta,
   });

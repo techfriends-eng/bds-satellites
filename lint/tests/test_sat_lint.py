@@ -93,6 +93,22 @@ class SatLint(unittest.TestCase):
         self.assertTrue({"Двоеточия в заголовках", "Тег code", "Длинное тире",
                          "Баннеры cbanner отсутствуют"} <= failed, failed)
 
+    def test_preparation_phrases_fail(self) -> None:
+        for phrase in ("Мы не смогли прочитать оригинал.", "Сайт вернул ошибка 403 роботу.",
+                       "При подготовке статьи ничего не нашлось.", "Сверяйте цифры с оригиналом.",
+                       "Страница документации недоступна.", "Статью не удалось полностью прочитать.",
+                       # дословно из черновика #9239: Хабр при этом был прочитан
+                       "При подготовке статьи мы не смогли прочитать страницу поста целиком.",
+                       "Всё, что не проверено нами, сверяйте с оригиналом."):
+            with self.subTest(phrase):
+                bad = good_html().replace("</p>", f" {phrase}</p>", 1)
+                self.assertIn("Подготовка статьи в тексте", run(bad)["failed_items"])
+
+    def test_stand_results_are_allowed(self) -> None:
+        html = good_html().replace(
+            "</p>", " Прогон этого не доказал, брокер ответил только на чтение.</p>", 1)
+        self.assertEqual(run(html)["failed_items"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

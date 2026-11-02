@@ -76,6 +76,7 @@ PROFILES = {
         "meta_status": False,
         "cbanners": 0,
         "require_blog_link": False,
+        "ban_preparation": True,
     },
 }
 DOMAIN = "bigdataschool.ru"  # --domain у профиля sat
@@ -259,8 +260,32 @@ def mermaid_marks(html: str) -> list[str]:
             if re.search(pattern, blocks, flags=re.M | re.I)]
 
 
+# Читателю не рассказываем о подготовке статьи (style/sat-delta.md). Вывод стенда в <pre> не проверяем.
+PREPARATION = re.compile(
+    r"(?:не\s+(?:смогли|удалось|получилось|вышло)\s+(?:\w+\s+)?(?:прочитать|открыть|получить|скачать|"
+    r"загрузить|изучить|просмотреть|проверить)"
+    r"|при\s+подготовке\s+(?:этой\s+|данной\s+)?(?:статьи|материала|текста)"
+    r"|на\s+момент\s+(?:написания|подготовки)"
+    r"|свер(?:яйте|ьте|ять)(?:\s+\w+){0,2}\s+с\s+(?:оригиналом|первоисточником|исходником)"
+    r"|ошибк\w*\s+(?:HTTP\s+)?(?:403|404)"
+    r"|(?:страниц\w*|стать\w*|оригинал\w*|исходник\w*|документаци\w*)\s+(?:\w+\s+)?"
+    r"(?:недоступн\w*|не\s+открыл\w*|закрыт\w*\s+для)"
+    r"|не\s+проверен\w*\s+нами"
+    r"|журнал\w*\s+разведки)",
+    flags=re.I,
+)
+
+
+def check_preparation(text: str, report: Report) -> None:
+    plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).replace("&nbsp;", " ")
+    found = [m.group(0) for m in PREPARATION.finditer(plain)]
+    report.check(not found, "Подготовка статьи в тексте", "нет", f"{len(found)} шт: {found[:3]}")
+
+
 def check_style(html: str, report: Report) -> None:
     text = strip_code(html)
+    if PROFILE.get("ban_preparation"):
+        check_preparation(text, report)
     report.check("—" not in text, "Длинное тире", "нет", f"{text.count('—')} шт")
     report.check("<code" not in html, "Тег code", "нет", "найден")
     report.check("`" not in text, "Backtick вне блоков кода", "нет", f"{text.count('`')} шт")
