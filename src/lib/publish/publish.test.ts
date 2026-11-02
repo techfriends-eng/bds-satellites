@@ -10,7 +10,7 @@ import { openState } from "../store/db.ts";
 import { gateNote, publishDraft, withUtm } from "./wp.ts";
 
 const cfg = parseSiteConfig(
-  "site: {id: kafka, domain: kafka-school.ru}\nselect: {keywords: [kafka]}\npublish: {categories: [127]}\n",
+  "site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}\nselect: {keywords: [kafka]}\npublish: {categories: [127]}\n",
 );
 
 test("UTM только на курсы своего сайта", () => {
@@ -36,6 +36,35 @@ test("комментарий о провале: проверки и high-зам�
     "<!-- sat: проверки не пройдены, статья не для публикации как есть\n- lint: Тег code\n- текст — против вывода\n-->\n",
   );
   assert.equal(gateNote({ ok: true, checks: {}, review: [] }), "");
+});
+
+test("провал стиля: ни картинок, ни нового поста, ни обновления старого", async () => {
+  const { db } = setup();
+  const touched: string[] = [];
+  const wp = new Proxy(
+    {},
+    {
+      get: (_t, name) => () => {
+        touched.push(String(name));
+        throw new Error("WP трогать нельзя");
+      },
+    },
+  ) as unknown as WpClient;
+  db.prepare("UPDATE drafts SET wp_post_id = 9197 WHERE id = 1").run();
+  const draft = db.prepare("SELECT * FROM drafts WHERE id = 1").get() as never;
+  const res = await publishDraft(
+    {
+      db,
+      cfg,
+      wp,
+      creds: { username: "u", appPassword: "p" },
+      styleFailures: () => ["Длинное тире: 2 шт"],
+    },
+    draft,
+    "s1",
+  );
+  assert.deepEqual(res, { blocked: ["Длинное тире: 2 шт"] });
+  assert.deepEqual(touched, []);
 });
 
 function setup() {
@@ -86,20 +115,20 @@ test("публикация: картинки в медиатеку, превью
       assert.ok(i.contentHtml.includes("utm_campaign=s1"));
       return { id: 9200, link: "https://kafka-school.ru/?p=9200", slug: "s1", status: "draft" };
     },
-    updateEntry: async (id: number) => {
-      calls.push(`update ${id}`);
+    updateEntry: async (id: number, i: { featuredMedia?: number }) => {
+      calls.push(`update ${id} featured=${i.featuredMedia}`);
       return { id, link: "https://kafka-school.ru/?p=9200", slug: "s1", status: "draft" };
     },
   } as unknown as WpClient;
   const creds = { username: "u", appPassword: "p" };
   const draft = () => db.prepare("SELECT * FROM drafts WHERE id = 1").get() as never;
-  await publishDraft({ db, cfg, wp, creds }, draft(), "s1");
-  await publishDraft({ db, cfg, wp, creds }, draft(), "s1");
+  await publishDraft({ db, cfg, wp, creds, styleFailures: () => [] }, draft(), "s1");
+  await publishDraft({ db, cfg, wp, creds, styleFailures: () => [] }, draft(), "s1");
   assert.deepEqual(calls, [
     "media s1_scheme1.jpg",
     "media s1_preview.jpg",
     "create draft featured=102 cat=127",
-    "update 9200",
+    "update 9200 featured=102",
   ]);
 
   const row = articleRow(db, cfg, 5);

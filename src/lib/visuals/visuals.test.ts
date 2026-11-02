@@ -3,9 +3,18 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { Brand } from "../brand/brand.ts";
 import { parseVisuals } from "./meta.ts";
-import { generatePreview } from "./preview.ts";
+import { generatePreview, PreviewFailed } from "./preview.ts";
 import { renderScheme, type Docker } from "./render.ts";
+
+const BRAND: Brand = {
+  primary: "#2F6F73",
+  accent: "#A9CBD4",
+  background: "#F4F8F9",
+  text: "#232C3D",
+};
+const THEME = { brand: BRAND, base: { themeVariables: { fontSize: "26px" } } };
 
 const META = `# Метаданные статьи X
 
@@ -76,8 +85,17 @@ test("рендер схемы: mmdc с конфигами форка, JPG 1200x8
     "1001:1001",
     "s_scheme1.jpg",
     "flowchart LR\n a-->b",
+    THEME,
   );
-  assert.equal(readFileSync(join(dir, "s_scheme1.jpg.mmd"), "utf8"), "flowchart LR\n a-->b\n");
+  assert.equal(
+    readFileSync(join(dir, "s_scheme1.jpg.mmd"), "utf8"),
+    "flowchart LR\n a-->b\n  classDef accent fill:#A9CBD4,stroke:#2F6F73,color:#232C3D;\n",
+  );
+  const conf = JSON.parse(readFileSync(join(dir, "s_scheme1.jpg.mermaid.json"), "utf8"));
+  assert.equal(conf.theme, "base");
+  assert.equal(conf.themeVariables.fontSize, "26px");
+  assert.equal(conf.themeVariables.primaryColor, "#2F6F73");
+  assert.match(conf.themeCSS, /color: #232C3D/);
   const cmd = calls[0].at(-1)!;
   assert.deepEqual(calls[0].slice(0, 7), [
     "run",
@@ -90,9 +108,12 @@ test("рендер схемы: mmdc с конфигами форка, JPG 1200x8
   ]);
   assert.match(
     cmd,
-    /mmdc -i s_scheme1\.jpg\.mmd .* -c \/visuals\/mermaid_theme_override\.json -s 3/,
+    /mmdc -i s_scheme1\.jpg\.mmd -o s_scheme1\.jpg\.png -b '#F4F8F9' .* -c s_scheme1\.jpg\.mermaid\.json -s 3/,
   );
-  assert.match(cmd, /-resize '1200x800>' -quality 95 s_scheme1\.jpg/);
+  assert.match(
+    cmd,
+    /-background '#F4F8F9' -flatten -resize '1200x800>' -quality 95 s_scheme1\.jpg/,
+  );
   assert.match(cmd, /exiftool -q -overwrite_original -all= s_scheme1\.jpg/);
 });
 
@@ -100,7 +121,7 @@ test("рендер схемы: ошибка mmdc — исключение с х�
   const dir = mkdtempSync(join(tmpdir(), "vis-"));
   const docker: Docker = () => ({ rc: 1, out: "Parse error on line 2\nExpecting 'SEMI'" });
   assert.throws(
-    () => renderScheme(docker, "img", dir, "1:1", "f.jpg", "bad"),
+    () => renderScheme(docker, "img", dir, "1:1", "f.jpg", "bad", THEME),
     /Parse error on line 2/,
   );
 });
@@ -136,6 +157,79 @@ test("превью: запасная модель маршрутом fallback, �
   assert.deepEqual(sent.models, ["a", "b"]);
   assert.equal(sent.route, "fallback");
   assert.deepEqual(sent.modalities, ["image", "text"]);
+});
+
+function imageFake(answers: { status?: number; body: string }[]) {
+  const sent: string[][] = [];
+  const fake = (async (_url: string, init: RequestInit) => {
+    sent.push((JSON.parse(String(init.body)) as { models: string[] }).models);
+    const a = answers[sent.length - 1];
+    return new Response(a.body, { status: a.status ?? 200 });
+  }) as unknown as typeof fetch;
+  return { fake, sent };
+}
+const NO_IMAGE = `${" ".repeat(400)}${JSON.stringify({
+  model: "m",
+  usage: { cost: 0.01 },
+  choices: [{ finish_reason: "stop", message: { content: "не могу" } }],
+})}`;
+const IMAGE = JSON.stringify({
+  usage: { cost: 0.04 },
+  choices: [{ message: { images: [{ image_url: { url: "data:image/png;base64,UE5H" } }] } }],
+});
+const noSleep = async () => {};
+
+test("превью: ответ без картинки повторяется со следующей модели, расход суммируется", async () => {
+  const { fake, sent } = imageFake([{ body: NO_IMAGE }, { body: IMAGE }]);
+  const r = await generatePreview({
+    apiKey: "k",
+    models: ["a", "b"],
+    prompt: "p",
+    fetch: fake,
+    sleep: noSleep,
+  });
+  assert.deepEqual(sent, [
+    ["a", "b"],
+    ["b", "a"],
+  ]);
+  assert.equal(r.costUsd, 0.05);
+});
+
+test("превью: три ответа без картинки — ошибка с причиной и расходом, а не пробелы", async () => {
+  const { fake, sent } = imageFake([{ body: NO_IMAGE }, { body: NO_IMAGE }, { body: NO_IMAGE }]);
+  await assert.rejects(
+    generatePreview({ apiKey: "k", models: ["a", "b"], prompt: "p", fetch: fake, sleep: noSleep }),
+    (e: unknown) =>
+      e instanceof PreviewFailed &&
+      /в ответе нет картинки \(m; stop; не могу\)/.test(e.message) &&
+      Math.abs(e.costUsd - 0.03) < 1e-9,
+  );
+  assert.equal(sent.length, 3);
+});
+
+test("превью: 402 не повторяется, 502 повторяется", async () => {
+  const empty = imageFake([{ status: 402, body: '{"error":{"message":"balance"}}' }]);
+  await assert.rejects(
+    generatePreview({
+      apiKey: "k",
+      models: ["a"],
+      prompt: "p",
+      fetch: empty.fake,
+      sleep: noSleep,
+    }),
+    /HTTP 402/,
+  );
+  assert.equal(empty.sent.length, 1);
+  const flaky = imageFake([{ status: 502, body: "bad gateway" }, { body: IMAGE }]);
+  const r = await generatePreview({
+    apiKey: "k",
+    models: ["a"],
+    prompt: "p",
+    fetch: flaky.fake,
+    sleep: noSleep,
+  });
+  assert.equal(flaky.sent.length, 2);
+  assert.equal(r.costUsd, 0.04);
 });
 
 test("метаданные: отклонения модели — превью под ##, промпт строкой, без маркеров", () => {

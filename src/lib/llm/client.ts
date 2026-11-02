@@ -29,6 +29,10 @@ export type Llm = {
     candidateId?: number,
   ): Promise<string>;
   spent(): number;
+  /** Потолок прогона исчерпан: платные вызовы дальше не делаются. */
+  exhausted(): boolean;
+  /** Расход вне ask (картинки): в журнал llm_calls и в потолок прогона. */
+  charge(stage: Stage, model: string, costUsd: number, candidateId?: number): void;
 };
 
 export function createLlm(db: Db, cfg: SiteConfig, chat: ChatClient): Llm {
@@ -39,6 +43,11 @@ export function createLlm(db: Db, cfg: SiteConfig, chat: ChatClient): Llm {
   );
   return {
     spent: () => spent,
+    exhausted: () => spent >= cfg.llm.maxCostPerRunUsd,
+    charge(stage, model, costUsd, candidateId) {
+      spent += costUsd;
+      log.run(nowIso(), stage, model, candidateId ?? null, 0, 0, 0, costUsd);
+    },
     async ask(stage, system, user, maxTokens, candidateId) {
       if (spent >= cfg.llm.maxCostPerRunUsd) {
         throw new BudgetExceeded(

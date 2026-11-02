@@ -5,7 +5,7 @@ import { openState } from "../store/db.ts";
 import { collect } from "./collect.ts";
 
 const cfg = parseSiteConfig(`
-site: {id: kafka, domain: kafka-school.ru}
+site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}
 sources:
   - {id: a, kind: blog, url: "https://a/rss"}
   - {id: b, kind: blog, url: "https://b/rss"}
@@ -61,5 +61,5 @@ test("сбор: повтор не плодит, почти-дубль из др�
 test("состояние: миграции идемпотентны", () => {
   const db = openState(":memory:");
   const n = db.prepare("SELECT count(*) AS n FROM _migrations").get() as { n: number };
-  assert.equal(n.n, 1);
+  assert.equal(n.n, 2);
 });

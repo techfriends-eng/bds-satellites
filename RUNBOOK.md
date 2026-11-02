@@ -30,7 +30,7 @@ flowchart LR
 ```
 
 Статусы кандидата: `new → (dup|bds|radar|skip) → picked → drafted → ran|run_failed → ready|gate_failed`
-(`rejected` — план сказал «не брать»).
+(`rejected` — план сказал «не брать»; `unreadable` — текст исходника не получен, см. §5).
 
 ## 3. Карта файлов на хосте
 
@@ -47,6 +47,10 @@ Application Password, `SAT_DB_URL` (sat_writer), `STACKRADAR_RO_URL` (sat_reader
 RUNBOOK stack-radar §5.
 
 ## 5. Данные и БД
+
+Текст от автора: кандидат в статусе `unreadable` (хаб, `sat.runs.stats.need_author_text`, причина в
+`candidates.skip_reason`) ждёт файл `/var/lib/bds-sat-<site>/source-text/<id кандидата>.md`, от 300 слов,
+владелец — пользователь сайта. Следующий шаг `draft` вернёт кандидата в работу.
 
 - `state.db` сайта (SQLite, `node:sqlite`): миграции в `src/lib/state/db.ts`, только добавление.
 - База `sat` на auto08: `sat.articles`, `sat.runs`. Хаб читает через FDW на supan8n.
@@ -67,7 +71,9 @@ selfcheck, smoke). Откат — прежний тег в `package.json` сай
 ## 8. Ежедневное сопровождение
 
 После прогонов сайтов: хаб → «Спутники»; расход OpenRouter против лимита ключа; черновики `gate_failed` —
-что не прошло (комментарий в начале поста в WP).
+что не прошло (комментарий в начале поста в WP). Провал стиля (двоеточия, тире, заголовок, `<code>` и другие
+`STYLE_ITEMS` линтера) в WP не уходит совсем, и уже созданный пост не обновляется: смотреть
+`stats.style_blocked` в журнале хаба.
 
 ## 9. Ручная проверка step-by-step
 
@@ -94,13 +100,19 @@ SAT_SITE_DIR=../bds-sat-kafka SAT_STATE_DIR=/tmp/sat scripts/sat.mjs collect   #
 | `write: ответ обрезан по maxTokens` | рассуждение Claude 5 съело ответ | с v0.1.14 потолок 64k; повторяется — `llm.reasoning` в конфиге сайта (effort ниже); handbook gotchas/llm.md#claude5-reasoning |
 | `SyntaxError` разбора JSON | код с ``` внутри ответа | `parseJson` уже это учитывает; если всё равно падает — `.work/` и ответ модели |
 | линтер: «Двоеточия в заголовках», «Тег code» | модель отошла от Style Guide | переписывание закрывает это само; повторяется — правка `prompts/write.md` |
-| превью: «в ответе нет картинки» | модель картинок недоступна | `llm.models.image`, запасная — gemini-2.5-flash-image |
+| превью: «в ответе нет картинки» | модель ответила текстом три раза подряд, причина в скобках | следующий прогон попробует снова; повторяется — `llm.models.image`, запасная — gemini-2.5-flash-image |
+| превью: HTTP 402, «requires at least $1.00 in balance» | баланс OpenRouter меньше $1 (порог для картинок, текст ещё идёт) | пополнить баланс; превью догенерирует следующий прогон |
+| превью: «потолок прогона» | расход дошёл до `llm.maxCostPerRunUsd` раньше конца прогона | ничего: следующий прогон начинает с `visuals`, обложка появится и у поста в WP |
 | превью: `delegate failed 'ufraw-batch'` | сырой файл с расширением `.raw` (до v0.1.11) | пакет ≥ v0.1.11; превью догенерирует следующий прогон или `sat visuals <id>` |
 | `run.json`: «нет run.sh или плохие имена: » (пустой список) | `run.sh` с shebang, имя во второй строке (до v0.1.13) | пакет ≥ v0.1.13 |
 | задания `*.py` падают без JVM/рантайма на хосте | раннер зовёт `.venv/bin/python` | `stand.pyRun` в конфиге сайта (spark — `spark-submit` в контейнере) |
 | схема не рендерится, Parse error | ошибка Mermaid в метаданных | черновик остаётся с `TODO_IMAGE`, правка в `_meta.md` и `sat visuals <id>` |
 | progon выключился посреди ручного прогона | `run-site.sh` запущен из ssh, lock в `/tmp` | только через юнит, RUNBOOK сайта §9; с v0.1.9 скрипт вне юнита отказывается |
 | прогон убит `status=15/TERM`, следом «пропуск» | unattended-upgrades + needrestart перезапустили юнит | `/etc/needrestart/conf.d/bds-sat.conf` ставит установщик сайта с v0.1.10; повторить §9 сайта |
+| в `fetchLog` «адрес вне разделов документации», `docs` в промпте «(нет)» | модель назвала страницу вне `docs` в `site.yaml`, нужной страницы нет в списке | добавить страницу или раздел в `docs`, проверить чтением (её текст, а не оглавление) |
+| кандидаты уходят в `unreadable` | сайт закрыт роботу, r.jina.ai ограничил анонимный доступ | §5, текст от автора; цепочка — `.work/research.json`, `fetchLog` |
+| `brand обязателен`, `brand: … цвет палитры bigdataschool.ru` при запуске или в гейте сайта | блок `brand` не заполнен или в нём цвет BDS | `sat brand-suggest` печатает предложение, автор подтверждает, блок в `config/site.yaml` |
+| selfcheck: FAIL `brand сходится с главной сайта` | сайт сменил стиль, палитра с другим оттенком или главная недоступна | `sat brand-check` печатает цвета главной и причину, поправить `brand`; уже готовые картинки сами не обновятся |
 | `журнал: не записан` | sat на auto08 недоступна | статьи не теряются, `sat sync` после восстановления |
 
 ## 12. Шпаргалка
@@ -110,4 +122,7 @@ npm run gate                                  # гейт
 ops/new-site.sh python python-school.ru fri ../bds-sat-python   # тонкий репо нового сайта
 scripts/sat.mjs gates 13                      # шаг по одному кандидату (id из state.db)
 scripts/sat.mjs sync                          # переписать журнал хаба по всем черновикам
+scripts/sat.mjs brand-check                   # brand против цветов главной сайта
+scripts/sat.mjs brand-suggest --domain x.ru   # предложение палитры нового сайта
+# brand: { primary: "#RRGGBB", accent: "#RRGGBB", background: "#RRGGBB", text: "#RRGGBB" }
 ```

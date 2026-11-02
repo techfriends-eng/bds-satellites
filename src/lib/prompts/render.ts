@@ -28,6 +28,10 @@ export function render(
     topics: cfg.topics.map((t) => `- ${t}`).join("\n"),
     courses: cfg.courses.map((c) => `- ${c.title} — https://${cfg.domain}${c.path}`).join("\n"),
     images: cfg.stand.images.join(", ") || "нет",
+    docs_index:
+      cfg.docs
+        .map((d) => `- ${d.title}: ${d.pages.map((p) => `${d.base}${p}`).join(", ") || d.base}`)
+        .join("\n") || "(не заданы)",
     py_run: cfg.stand.pyRun
       ? cfg.stand.pyRun.replaceAll("{file}", "ФАЙЛ")
       : ".venv/bin/python ФАЙЛ (python3, если .venv нет)",

@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { brandMermaid, mermaidConfig, type Brand } from "../brand/brand.ts";
 
 /**
  * Картинки статьи в контейнере bds-sat-visuals (visuals/Dockerfile, форк wiki_visualizer):
- * Mermaid → PNG (scale 3, шрифт и CSS подписей из visuals/), затем JPG 1200×800 на фоне палитры и
+ * Mermaid → PNG (scale 3, шрифт из visuals/, цвета из brand сайта), затем JPG 1200×800 на фоне brand и
  * чистка метаданных exiftool. Контейнер идёт с uid хоста и видит только каталог черновика.
  */
 export type Docker = (args: string[]) => { rc: number; out: string };
@@ -14,7 +15,6 @@ export const dockerCli: Docker = (args) => {
   return { rc: r.status ?? 1, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 };
 
-const BG = "#F5F7FA"; // brand_colors[2] из visuals/image_spec.json
 const FINAL = "1200x800";
 
 function run(docker: Docker, image: string, dir: string, uid: string, cmd: string): void {
@@ -23,9 +23,12 @@ function run(docker: Docker, image: string, dir: string, uid: string, cmd: strin
 }
 
 /** Сжимает до 1200×800 без обрезки (">"), фон палитры, JPEG 95, без метаданных. */
-function finalize(png: string, jpg: string): string {
-  return `convert ${png} -background '${BG}' -flatten -resize '${FINAL}>' -quality 95 ${jpg} && exiftool -q -overwrite_original -all= ${jpg} && rm -f ${png}`;
+function finalize(png: string, jpg: string, background: string): string {
+  return `convert ${png} -background '${background}' -flatten -resize '${FINAL}>' -quality 95 ${jpg} && exiftool -q -overwrite_original -all= ${jpg} && rm -f ${png}`;
 }
+
+/** Палитра сайта и база параметров mmdc (visuals/mermaid_theme_override.json). */
+export type SchemeTheme = { brand: Brand; base: Record<string, unknown> };
 
 export function renderScheme(
   docker: Docker,
@@ -34,16 +37,20 @@ export function renderScheme(
   uid: string,
   file: string,
   mermaid: string,
+  theme: SchemeTheme,
 ): void {
   const mmd = `${file}.mmd`;
-  writeFileSync(join(dir, mmd), `${mermaid}\n`);
+  const conf = `${file}.mermaid.json`;
+  writeFileSync(join(dir, mmd), `${brandMermaid(mermaid, theme.brand)}\n`);
+  writeFileSync(join(dir, conf), JSON.stringify(mermaidConfig(theme.base, theme.brand)));
+  const bg = theme.brand.background;
   const png = `${file}.png`;
   run(
     docker,
     image,
     dir,
     uid,
-    `mmdc -i ${mmd} -o ${png} -b '${BG}' -p /visuals/puppeteer-config.json -c /visuals/mermaid_theme_override.json -s 3 && rm -f ${mmd} && ${finalize(png, file)}`,
+    `mmdc -i ${mmd} -o ${png} -b '${bg}' -p /visuals/puppeteer-config.json -c ${conf} -s 3 && rm -f ${mmd} ${conf} && ${finalize(png, file, bg)}`,
   );
 }
 
@@ -55,6 +62,7 @@ export function finalizePreview(
   uid: string,
   raw: string,
   file: string,
+  background: string,
 ): void {
-  run(docker, image, dir, uid, finalize(raw, file));
+  run(docker, image, dir, uid, finalize(raw, file, background));
 }

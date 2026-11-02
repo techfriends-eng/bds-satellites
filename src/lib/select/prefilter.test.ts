@@ -8,7 +8,7 @@ import { openState } from "../store/db.ts";
 import { prefilter } from "./prefilter.ts";
 
 const cfg = parseSiteConfig(`
-site: {id: kafka, domain: kafka-school.ru}
+site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}
 sources:
   - {id: aiven, kind: blog, url: "https://aiven/rss"}
   - {id: tags, kind: release, url: "https://gh/tags"}

@@ -25,6 +25,7 @@ for v in SAT_SITE_DIR SAT_STATE_DIR OPENROUTER_API_KEY WP_URL WP_USER WP_APP_PAS
 done
 check "каталог состояния пишется" test -w "${SAT_STATE_DIR:-/nonexistent}"
 check "конфиг сайта читается" node "$PKG/dist/cli.js" sync --check-config
+check "brand сходится с главной сайта" node "$PKG/dist/cli.js" brand-check
 # Ключи читает node из окружения: в команде их нет ни в виде аргументов, ни в истории оболочки.
 check "OpenRouter: ключ принят" node -e '
   fetch("https://openrouter.ai/api/v1/key", { headers: { authorization: "Bearer " + process.env.OPENROUTER_API_KEY } })

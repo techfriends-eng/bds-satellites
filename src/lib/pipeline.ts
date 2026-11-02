@@ -8,19 +8,24 @@ import pg from "pg";
 import { loadSiteConfig, type SiteConfig } from "./config/site.ts";
 import { markBds, syncBds } from "./dedup/bds.ts";
 import { markRadar, TAKEN_SQL } from "./dedup/radar.ts";
+import { lint } from "./gates/checks.ts";
 import { finish, gate, slugOf, type GateDeps } from "./gates/run.ts";
 import { writeDraft, type Candidate } from "./generate/draft.ts";
 import { createJournal, type Journal, type Query } from "./journal/journal.ts";
 import { BudgetExceeded, createLlm, OPENROUTER } from "./llm/client.ts";
 import { publishDraft } from "./publish/wp.ts";
+import { manualPath } from "./research/source.ts";
 import { pick, score } from "./select/rank.ts";
 import { prefilter } from "./select/prefilter.ts";
 import { collect } from "./sources/collect.ts";
 import { checkDraft } from "./stand/check.ts";
 import { CANDIDATE_COLS, openState, type Db } from "./store/db.ts";
 import { loadStyle } from "./style/rules.ts";
+import { parse } from "yaml";
+import { brandPreviewPrompt } from "./brand/brand.ts";
+import { brandYaml, checkBrand, fetchSiteColors, suggestBrand } from "./brand/homepage.ts";
 import { parseVisuals } from "./visuals/meta.ts";
-import { generatePreview } from "./visuals/preview.ts";
+import { generatePreview, PreviewFailed } from "./visuals/preview.ts";
 import { dockerCli, finalizePreview, renderScheme } from "./visuals/render.ts";
 
 /**
@@ -42,6 +47,14 @@ export const STEPS = [
 ] as const;
 export type Step = (typeof STEPS)[number];
 
+/**
+ * Прогон начинает с визуализаций: обложки, что ждут с прошлого раза, получают деньги раньше новых статей.
+ * Прогон у потолка иначе оставляет их без превью снова (kafka 2 ноября, $3,12 ушло до шага visuals).
+ */
+export const RUN_STEPS: Step[] = ["visuals", ...STEPS];
+/** После потолка идут только шаги без платных вызовов: схемы и публикация уже готового. */
+const AFTER_CEILING = new Set<Step>(["visuals", "publish"]);
+
 const PKG = process.env.SAT_PKG_DIR ?? join(import.meta.dirname, "..", "..");
 /** Сырые превью модели в корне черновика (до v0.1.16, в т. ч. «.jpg.raw» v0.1.10) линтер считает лишними файлами. */
 function dropStrayPreviews(dir: string): void {
@@ -58,8 +71,14 @@ type Ctx = {
   journal: Journal;
   gateDeps: GateDeps;
   draftsDir: string;
+  manualDir: string;
   ids?: number[];
+  /** Превью, что не вышло в этом прогоне: второй проход visuals за него не платит. */
+  previewFailed: Set<number>;
 };
+
+/** Сколько нечитаемых кандидатов заменять за прогон: ниже — следующий прогон. */
+const MAX_UNREADABLE_PER_RUN = 10;
 
 function optionalSecret(name: string): string | null {
   try {
@@ -100,7 +119,36 @@ function drafts(db: Db, statuses: string[], ids?: number[]) {
 function errorOf(ctx: Ctx, step: string, id: number, err: unknown): void {
   if (err instanceof BudgetExceeded) throw err;
   const list = (ctx.journal.stats.errors ??= []) as string[];
-  list.push(`${step} ${id}: ${(err as Error).message}`.slice(0, 300));
+  const line = `${step} ${id}: ${(err as Error).message}`.slice(0, 300);
+  if (!list.includes(line)) list.push(line); // visuals идёт дважды, сломанная схема — одна ошибка
+}
+
+/**
+ * Шаги по порядку. Потолок останавливает платные шаги, но готовое уходит в WP, а не ждёт следующего
+ * прогона. Любая другая ошибка останавливает прогон. Возвращает текст ошибки для журнала.
+ */
+export async function runSteps(
+  steps: Step[],
+  exec: (step: Step) => Promise<void>,
+  command: string,
+): Promise<string | null> {
+  let error: string | null = null;
+  let ceiling = false;
+  for (const step of steps) {
+    if (ceiling && !AFTER_CEILING.has(step)) continue;
+    try {
+      await exec(step);
+    } catch (err) {
+      error = (err as Error).message.slice(0, 500);
+      console.error(`sat ${command}: ${(err as Error).stack ?? error}`);
+      if (!(err instanceof BudgetExceeded)) {
+        process.exitCode = 1;
+        break;
+      }
+      ceiling = true;
+    }
+  }
+  return error;
 }
 
 const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
@@ -137,24 +185,53 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
     ctx.journal.stats.picked = pick(ctx.db, ctx.cfg);
   },
   async draft(ctx) {
-    const rows = ctx.db
-      .prepare(`SELECT ${CANDIDATE_COLS} FROM candidates WHERE status = 'picked'`)
-      .all() as Candidate[];
-    for (const row of rows.filter((r) => !ctx.ids?.length || ctx.ids.includes(r.id))) {
-      ctx.journal.touch(row.id);
-      try {
-        await writeDraft(
-          {
-            ...ctx.gateDeps,
-            draftsDir: ctx.draftsDir,
-            getHtml: (u) => fetchText(u, 30_000, 2_000_000),
-          },
-          row,
-        );
-      } catch (err) {
-        errorOf(ctx, "draft", row.id, err); // тема остаётся picked, попадёт в следующий прогон
-      }
+    const { db, cfg, journal, manualDir } = ctx;
+    const status = db.prepare("UPDATE candidates SET status = 'picked' WHERE id = ?");
+    // Автор положил текст: кандидат возвращается в работу.
+    const waiting = db.prepare("SELECT id FROM candidates WHERE status = 'unreadable'").all() as {
+      id: number;
+    }[];
+    for (const { id } of waiting) {
+      if (existsSync(manualPath(manualDir, id))) status.run(id);
     }
+    const needText: { id: number; url: string; file: string }[] = [];
+    const tried = new Set<number>();
+    for (;;) {
+      const rows = (
+        db
+          .prepare(`SELECT ${CANDIDATE_COLS} FROM candidates WHERE status = 'picked'`)
+          .all() as Candidate[]
+      ).filter((r) => !tried.has(r.id) && (!ctx.ids?.length || ctx.ids.includes(r.id)));
+      let unreadable = 0;
+      for (const row of rows) {
+        tried.add(row.id);
+        journal.touch(row.id);
+        try {
+          await writeDraft(
+            {
+              ...ctx.gateDeps,
+              draftsDir: ctx.draftsDir,
+              manualDir,
+              getHtml: (u) => fetchText(u, 60_000, 2_000_000),
+            },
+            row,
+          );
+        } catch (err) {
+          errorOf(ctx, "draft", row.id, err); // тема остаётся picked, попадёт в следующий прогон
+        }
+        const now = db.prepare("SELECT status FROM candidates WHERE id = ?").get(row.id) as {
+          status: string;
+        };
+        if (now.status === "unreadable") {
+          unreadable++;
+          needText.push({ id: row.id, url: row.url, file: manualPath(manualDir, row.id) });
+        }
+      }
+      // Вместо нечитаемого — следующий кандидат. Без замены прогон остался бы без статьи.
+      if (!unreadable || ctx.ids?.length || needText.length >= MAX_UNREADABLE_PER_RUN) break;
+      if (!pick(db, cfg).length) break;
+    }
+    if (needText.length) journal.stats.need_author_text = needText;
   },
   async stand(ctx) {
     for (const d of drafts(ctx.db, ["drafted"], ctx.ids)) {
@@ -191,6 +268,10 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
     const image = `bds-sat-visuals:${VERSION}`;
     const uid = `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`;
     const apiKey = readSecret("OPENROUTER_API_KEY");
+    const { brand } = ctx.cfg;
+    const base = JSON.parse(
+      readFileSync(join(PKG, "visuals", "mermaid_theme_override.json"), "utf8"),
+    ) as Record<string, unknown>;
     for (const d of drafts(ctx.db, ["ready", "gate_failed"], ctx.ids)) {
       const slug = slugOf(d.dir);
       dropStrayPreviews(d.dir);
@@ -200,27 +281,39 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
       for (const s of schemes) {
         if (existsSync(join(d.dir, s.file))) continue;
         try {
-          renderScheme(dockerCli, image, d.dir, uid, s.file, s.mermaid);
+          renderScheme(dockerCli, image, d.dir, uid, s.file, s.mermaid, { brand, base });
         } catch (err) {
           errorOf(ctx, `схема ${s.n}`, d.candidate_id, err);
         }
       }
       if (preview && !existsSync(join(d.dir, preview.file))) {
+        if (ctx.previewFailed.has(d.candidate_id)) continue;
+        const { llm } = ctx.gateDeps;
+        if (llm.exhausted()) {
+          errorOf(
+            ctx,
+            "превью",
+            d.candidate_id,
+            new Error("потолок прогона, ждёт следующий прогон"),
+          );
+          continue;
+        }
         try {
           const img = await generatePreview({
             apiKey,
             models: [ctx.cfg.llm.models.image, "google/gemini-2.5-flash-image"],
-            prompt: preview.prompt,
+            prompt: brandPreviewPrompt(preview.prompt, brand),
           });
+          // Расход пишем до сборки JPEG: картинка оплачена, даже если сборка упадёт.
+          llm.charge("image", img.model, img.costUsd, d.candidate_id);
           const raw = `.work/${preview.file}.${img.ext}`;
           writeFileSync(join(d.dir, raw), img.bytes);
-          finalizePreview(dockerCli, image, d.dir, uid, raw, preview.file);
-          ctx.db
-            .prepare(
-              "INSERT INTO llm_calls (at, stage, model, candidate_id, cost_usd) VALUES (?, 'image', ?, ?, ?)",
-            )
-            .run(new Date().toISOString(), img.model, d.candidate_id, img.costUsd);
+          finalizePreview(dockerCli, image, d.dir, uid, raw, preview.file, brand.background);
         } catch (err) {
+          if (err instanceof PreviewFailed && err.costUsd > 0) {
+            llm.charge("image", ctx.cfg.llm.models.image, err.costUsd, d.candidate_id);
+          }
+          ctx.previewFailed.add(d.candidate_id);
           errorOf(ctx, "превью", d.candidate_id, err);
         }
       }
@@ -229,10 +322,20 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
   async publish(ctx) {
     const wp = createWp({ baseUrl: readSecret("WP_URL") });
     const creds = { username: readSecret("WP_USER"), appPassword: readSecret("WP_APP_PASSWORD") };
+    const styleFailures = (dir: string, slug: string) =>
+      lint(ctx.gateDeps.lintPy, dir, slug, ctx.cfg.domain, slug).style;
     for (const d of drafts(ctx.db, ["ready", "gate_failed"], ctx.ids)) {
       ctx.journal.touch(d.candidate_id);
       try {
-        await publishDraft({ db: ctx.db, cfg: ctx.cfg, wp, creds }, d, slugOf(d.dir));
+        const res = await publishDraft(
+          { db: ctx.db, cfg: ctx.cfg, wp, creds, styleFailures },
+          d,
+          slugOf(d.dir),
+        );
+        if ("blocked" in res) {
+          const list = (ctx.journal.stats.style_blocked ??= []) as unknown[];
+          list.push({ id: d.candidate_id, items: res.blocked.map((b) => b.slice(0, 200)) });
+        }
       } catch (err) {
         errorOf(ctx, "publish", d.candidate_id, err);
       }
@@ -240,8 +343,45 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
   },
 };
 
+/** Предложение палитры: `--domain` у нового сайта, конфига которого ещё нет в разборе. */
+async function brandSuggest(rest: string[]): Promise<number> {
+  const at = rest.indexOf("--domain");
+  const domain =
+    at >= 0
+      ? rest[at + 1]
+      : (
+          parse(
+            readFileSync(
+              join(process.env.SAT_SITE_DIR ?? process.cwd(), "config", "site.yaml"),
+              "utf8",
+            ),
+          ) as { site?: { domain?: string } }
+        ).site?.domain;
+  if (!domain) throw new Error("brand-suggest: нужен --domain или site.domain в конфиге");
+  const brand = suggestBrand(await fetchSiteColors(domain));
+  if (!brand) {
+    console.error(`${domain}: на главной нет цветов с оттенком, палитру задаёт автор`);
+    return 1;
+  }
+  console.log(brandYaml(brand));
+  return 0;
+}
+
+/** Сверка brand с главной страницей сайта. Выход 0 — сходится, 1 — нет или страница недоступна. */
+async function brandCheck(): Promise<number> {
+  const cfg = loadSiteConfig(
+    join(process.env.SAT_SITE_DIR ?? process.cwd(), "config", "site.yaml"),
+  );
+  const res = checkBrand(cfg.brand, await fetchSiteColors(cfg.domain));
+  console.log(`главная ${cfg.domain}: ${res.site.map((c) => c.hex).join(" ") || "цветов нет"}`);
+  for (const p of res.problems) console.error(p);
+  return res.ok ? 0 : 1;
+}
+
 export async function main(argv: string[]): Promise<number> {
   const [command = "run", ...rest] = argv;
+  if (command === "brand-suggest") return brandSuggest(rest);
+  if (command === "brand-check") return brandCheck();
   if (rest.includes("--check-config")) {
     loadSiteConfig(join(process.env.SAT_SITE_DIR ?? process.cwd(), "config", "site.yaml"));
     return 0; // selfcheck: конфиг сайта разбирается
@@ -261,14 +401,16 @@ export async function main(argv: string[]): Promise<number> {
   }
   const steps: Step[] =
     command === "run"
-      ? [...STEPS]
+      ? RUN_STEPS
       : command === "sync"
         ? []
         : STEPS.includes(command as Step)
           ? [command as Step]
           : [];
   if (!steps.length && command !== "sync") {
-    console.error(`sat: неизвестная команда ${command}; есть run, sync, note, ${STEPS.join(", ")}`);
+    console.error(
+      `sat: неизвестная команда ${command}; есть run, sync, note, brand-check, brand-suggest, ${STEPS.join(", ")}`,
+    );
     return 2;
   }
   const llm = createLlm(
@@ -282,6 +424,8 @@ export async function main(argv: string[]): Promise<number> {
     journal,
     ids,
     draftsDir: join(stateDir, "drafts"),
+    manualDir: join(stateDir, "source-text"),
+    previewFailed: new Set(),
     gateDeps: {
       db,
       cfg,
@@ -297,14 +441,7 @@ export async function main(argv: string[]): Promise<number> {
     for (const d of drafts(db, ["drafted", "ran", "run_failed", "gate_failed", "ready"]))
       journal.touch(d.candidate_id);
   }
-  let error: string | null = null;
-  try {
-    for (const step of steps) await run[step](ctx);
-  } catch (err) {
-    error = (err as Error).message.slice(0, 500);
-    console.error(`sat ${command}: ${(err as Error).stack ?? error}`);
-    if (!(err instanceof BudgetExceeded)) process.exitCode = 1;
-  }
+  const error = await runSteps(steps, (step) => run[step](ctx), command);
   journal.stats.cost_usd = Math.round(llm.spent() * 1000) / 1000;
   const errs = journal.stats.errors as string[] | undefined;
   await journal.close(

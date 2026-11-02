@@ -12,7 +12,7 @@ import { finish, gate, reviseOnce, type GateDeps } from "./run.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..");
 const cfg = parseSiteConfig(
-  "site: {id: kafka, domain: kafka-school.ru}\nselect: {keywords: [kafka]}\nstand: {images: [apache/kafka:4.3.2]}\n",
+  "site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}\nselect: {keywords: [kafka]}\nstand: {images: [apache/kafka:4.3.2]}\n",
 );
 const pre = (lang: string, body: string) =>
   `<pre class="EnlighterJSRAW" data-enlighter-language="${lang}">${body}</pre>`;
@@ -72,7 +72,12 @@ function setup(html: string) {
 }
 
 function deps(db: ReturnType<typeof openState>, answers: Partial<Record<Stage, string>>): GateDeps {
-  const llm: Llm = { spent: () => 0, ask: async (stage) => answers[stage] ?? "" };
+  const llm: Llm = {
+    spent: () => 0,
+    exhausted: () => false,
+    charge: () => {},
+    ask: async (stage) => answers[stage] ?? "",
+  };
   return {
     db,
     cfg,
@@ -129,10 +134,12 @@ test("доводка: стенд с прошлого раза не прошёл 
   const stages: string[] = [];
   const d = deps(db, {});
   d.cfg = parseSiteConfig(
-    `site: {id: kafka, domain: kafka-school.ru}\nselect: {keywords: [kafka]}\nstand: {base: ${join(dir, "runs")}}\n`,
+    `site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}\nselect: {keywords: [kafka]}\nstand: {base: ${join(dir, "runs")}}\n`,
   );
   d.llm = {
     spent: () => 0,
+    exhausted: () => false,
+    charge: () => {},
     ask: async (stage) => (
       stages.push(stage),
       stage === "review" ? '{"issues": [{"severity": "high", "quote": "q", "problem": "p"}]}' : ""

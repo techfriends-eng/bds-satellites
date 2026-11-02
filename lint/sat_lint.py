@@ -67,7 +67,7 @@ PROFILES = {
     "sat": {
         "dir": ".",
         "words": (1500, 2600),
-        "colon_limit": 5,
+        "colon_limit": 0,          # строгий стиль спутников, задача 92: служебные двоеточия не в счёт
         "refs_tag": "h2",
         "gutenberg_lead": False,
         "title_max": 60,
@@ -76,8 +76,20 @@ PROFILES = {
         "meta_status": False,
         "cbanners": 0,
         "require_blog_link": False,
+        "ban_preparation": True,
+        "strict_title": True,      # заголовок поста и SEO Title без двоеточия и тире
+        "strict_dash": True,       # тире в виде сущности и короткое тире с пробелами тоже тире
     },
 }
+# Провалы стиля: такая статья не уходит в WP даже черновиком (src/lib/publish/wp.ts).
+STYLE_ITEMS = {
+    "Двоеточия в заголовках", "Двоеточия в теле статьи", "Заголовок статьи без двоеточия и тире",
+    "SEO Title без двоеточия и тире", "Длинное тире", "Подготовка статьи в тексте", "Тег code",
+    "Backtick вне блоков кода", "Горизонтальный разделитель", "Эмодзи", "Блоки Mermaid в HTML",
+    "Markdown-разметка в HTML", "Голые URL в теле статьи",
+}
+STRICT_DASH = re.compile(r"—|&mdash;|&#8212;|&#x2014;|\s–\s", flags=re.I)
+TITLE_BAN = re.compile(r"[:—–]|&mdash;|&#8212;|&#x2014;", flags=re.I)
 DOMAIN = "bigdataschool.ru"  # --domain у профиля sat
 PROFILE = PROFILES["wiki"]
 
@@ -259,9 +271,34 @@ def mermaid_marks(html: str) -> list[str]:
             if re.search(pattern, blocks, flags=re.M | re.I)]
 
 
+# Читателю не рассказываем о подготовке статьи (style/sat-delta.md). Вывод стенда в <pre> не проверяем.
+PREPARATION = re.compile(
+    r"(?:не\s+(?:смогли|удалось|получилось|вышло)\s+(?:\w+\s+)?(?:прочитать|открыть|получить|скачать|"
+    r"загрузить|изучить|просмотреть|проверить)"
+    r"|при\s+подготовке\s+(?:этой\s+|данной\s+)?(?:статьи|материала|текста)"
+    r"|на\s+момент\s+(?:написания|подготовки)"
+    r"|свер(?:яйте|ьте|ять)(?:\s+\w+){0,2}\s+с\s+(?:оригиналом|первоисточником|исходником)"
+    r"|ошибк\w*\s+(?:HTTP\s+)?(?:403|404)"
+    r"|(?:страниц\w*|стать\w*|оригинал\w*|исходник\w*|документаци\w*)\s+(?:\w+\s+)?"
+    r"(?:недоступн\w*|не\s+открыл\w*|закрыт\w*\s+для)"
+    r"|не\s+проверен\w*\s+нами"
+    r"|журнал\w*\s+разведки)",
+    flags=re.I,
+)
+
+
+def check_preparation(text: str, report: Report) -> None:
+    plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).replace("&nbsp;", " ")
+    found = [m.group(0) for m in PREPARATION.finditer(plain)]
+    report.check(not found, "Подготовка статьи в тексте", "нет", f"{len(found)} шт: {found[:3]}")
+
+
 def check_style(html: str, report: Report) -> None:
     text = strip_code(html)
-    report.check("—" not in text, "Длинное тире", "нет", f"{text.count('—')} шт")
+    if PROFILE.get("ban_preparation"):
+        check_preparation(text, report)
+    dashes = STRICT_DASH.findall(text) if PROFILE.get("strict_dash") else re.findall("—", text)
+    report.check(not dashes, "Длинное тире", "нет", f"{len(dashes)} шт")
     report.check("<code" not in html, "Тег code", "нет", "найден")
     report.check("`" not in text, "Backtick вне блоков кода", "нет", f"{text.count('`')} шт")
     report.check("<hr" not in html, "Горизонтальный разделитель", "нет", "найден")
@@ -349,6 +386,13 @@ def check_lead_and_seo(html: str, meta: str, report: Report) -> None:
                      f"{title!r}",
                      f"ожидалось начало {title!r}, найдено {opening[:len(title) + 20]!r}")
 
+    if PROFILE.get("strict_title"):
+        post = re.search(r"^-\s*\*\*Заголовок статьи:\*\*\s*(.+)$", meta, flags=re.M)
+        value = post.group(1).strip() if post else ""
+        report.check(bool(value) and not TITLE_BAN.search(value),
+                     "Заголовок статьи без двоеточия и тире", "да",
+                     repr(value) if value else "строки нет в метаданных")
+
     seo = re.search(r"^-\s*\*\*Title:\*\*\s*(.+)$", meta, flags=re.M)
     if not seo:
         report.add("FAIL", "SEO Title в метаданных", "строки нет")
@@ -358,6 +402,8 @@ def check_lead_and_seo(html: str, meta: str, report: Report) -> None:
         report.check(len(value) <= cap, f"SEO Title до {cap} символов",
                      f"{len(value)} символов",
                      f"{len(value)} символов при потолке {cap}: {value!r}")
+        if PROFILE.get("strict_title"):
+            report.check(not TITLE_BAN.search(value), "SEO Title без двоеточия и тире", "да", repr(value))
 
     if PROFILE["meta_status"]:
         status = re.search(r"^-\s*\*\*Статус:\*\*\s*(.+)$", meta, flags=re.M)
@@ -390,12 +436,10 @@ def check_images(html: str, meta: str, report: Report) -> None:
                      f"{len(files)} картинок, все есть в meta", f"нет описания: {orphans}")
 
         schemes = len(re.findall(r"^### Схема", meta, flags=re.M))
-        mermaid_blocks = len(re.findall(r"%%\{init:", meta))
+        mermaid_blocks = len(re.findall(r"^```mermaid\s*$", meta, flags=re.M))
         report.check(schemes == mermaid_blocks and mermaid_blocks > 0, "Код Mermaid у каждой схемы",
                      f"{schemes} схем, {mermaid_blocks} блоков Mermaid",
                      f"{schemes} схем против {mermaid_blocks} блоков Mermaid")
-        colors = all(c in meta for c in ("#294A70", "#FFAB1F", "#F5F7FA"))
-        report.check(colors, "Фирменные цвета в схемах", "есть", "init-блок без палитры A8")
 
 
 def check_code_blocks(html: str, report: Report) -> None:
@@ -585,6 +629,8 @@ def lint(slug: str, key: str | None, as_json: bool = False,
             "fails": report.failed,
             "warns": report.warned,
             "failed_items": [name for status, name, _ in report.rows if status == "FAIL"],
+            "style_failed": [f"{name}: {comment}"[:600] for status, name, comment in report.rows
+                             if status == "FAIL" and name in STYLE_ITEMS],
             **numbers,
         }
         print(json.dumps(payload, ensure_ascii=False))

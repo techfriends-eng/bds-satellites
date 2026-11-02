@@ -4,6 +4,5 @@
   "final_format": "jpg",
   "draft_format": "jpg",
   "final_quality_hint": "high",
-  "draft_quality_hint": "low",
-  "brand_colors": ["#294A70", "#FFAB1F", "#F5F7FA"]
+  "draft_quality_hint": "low"
 }

@@ -6,7 +6,7 @@ import { openState } from "../store/db.ts";
 import { BudgetExceeded, createLlm, parseJson, Truncated } from "./client.ts";
 
 const cfg = parseSiteConfig(`
-site: {id: kafka, domain: kafka-school.ru}
+site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}
 select: {keywords: [kafka]}
 llm:
   models: {select: m-haiku, write: m-sonnet}
@@ -60,4 +60,18 @@ test("parseJson: код с ``` внутри строки, обёртка, тек
   assert.throws(() => parseJson("нет json"), SyntaxError);
   // «Extra data»: после JSON второй объект (прототип, 2026-10-31) и скобки внутри строк
   assert.equal(parseJson<{ a: string }>('{"a": "x } ] \\" {"}\n{"b": 2}').a, 'x } ] " {');
+});
+
+test("расход картинки идёт в журнал и в потолок прогона", () => {
+  const db = openState(":memory:");
+  const llm = createLlm(db, cfg, fakeChat([]).chat);
+  assert.equal(llm.exhausted(), false);
+  llm.charge("image", "m-image", 0.06, 7);
+  assert.equal(llm.spent(), 0.06);
+  assert.equal(llm.exhausted(), true);
+  const row = db.prepare("SELECT stage, model, candidate_id, cost_usd FROM llm_calls").get();
+  assert.deepEqual(
+    { ...(row as object) },
+    { stage: "image", model: "m-image", candidate_id: 7, cost_usd: 0.06 },
+  );
 });

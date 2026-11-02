@@ -1,6 +1,9 @@
 # Конфиг __DOMAIN__ для bds-satellites (схема — src/lib/config/site.ts пакета). Ленты и курсы сайта — по списку источников в docs/ приватного репо сайта.
 site: { id: __SITE__, domain: __DOMAIN__ }
 
+# brand обязателен: без него конфиг не разбирается. Предложение печатает ops/new-site.sh, подтверждает автор.
+# Формат: brand: { primary: "#RRGGBB", accent: "#RRGGBB", background: "#RRGGBB", text: "#RRGGBB" }
+
 topics: []
 
 courses: []

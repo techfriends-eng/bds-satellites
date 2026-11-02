@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { parse } from "yaml";
+import { parseBrand, type Brand } from "../brand/brand.ts";
 
 /** Конфиг сайта-спутника: `config/site.yaml` в репо сайта (bds-sat-<site>). */
 
@@ -9,13 +10,17 @@ export type SourceKind = (typeof SOURCE_KINDS)[number];
 
 export type Source = { id: string; kind: SourceKind; title: string; url: string; topical: boolean };
 export type Course = { title: string; path: string };
+/** Раздел официальной документации: версия задана адресом, pages — проверенные пути от base. */
+export type DocSource = { title: string; base: string; pages: string[] };
 
 export type SiteConfig = {
   siteId: string;
   domain: string;
+  brand: Brand;
   topics: string[];
   courses: Course[];
   sources: Source[];
+  docs: DocSource[];
   collect: { timeoutMs: number; simhashMaxDistance: number; simhashMinWords: number };
   select: {
     maxAgeDays: number;
@@ -59,6 +64,15 @@ export function expandHome(path: string, home = homedir()): string {
   return path.startsWith("~/") ? `${home}${path.slice(1)}` : path;
 }
 
+function parseDocs(raw: Raw): DocSource[] {
+  return ((raw.docs as Partial<DocSource>[] | undefined) ?? []).map((d) => {
+    const base = String(d.base);
+    if (!d.title || !/^https?:\/\/[^/]+\/(.*\/)?$/.test(base))
+      throw new Error(`docs: нужны title и base с «/» на конце (${base})`);
+    return { title: d.title, base, pages: d.pages ?? [] };
+  });
+}
+
 export function parseSiteConfig(text: string): SiteConfig {
   const raw = (parse(text) ?? {}) as Raw;
   if (!raw.site?.id || !raw.site.domain) throw new Error("site.id и site.domain обязательны");
@@ -99,9 +113,11 @@ export function parseSiteConfig(text: string): SiteConfig {
   return {
     siteId: raw.site.id,
     domain: raw.site.domain,
+    brand: parseBrand(raw.brand),
     topics: (raw.topics as string[] | undefined) ?? [],
     courses: (raw.courses as Course[] | undefined) ?? [],
     sources,
+    docs: parseDocs(raw),
     collect: section(raw, "collect", {
       timeoutMs: 20_000,
       simhashMaxDistance: 6,
