@@ -21,6 +21,7 @@ import { collect } from "./sources/collect.ts";
 import { checkDraft } from "./stand/check.ts";
 import { CANDIDATE_COLS, openState, type Db } from "./store/db.ts";
 import { loadStyle } from "./style/rules.ts";
+import { brandPreviewPrompt } from "./brand/brand.ts";
 import { parseVisuals } from "./visuals/meta.ts";
 import { generatePreview, PreviewFailed } from "./visuals/preview.ts";
 import { dockerCli, finalizePreview, renderScheme } from "./visuals/render.ts";
@@ -265,6 +266,10 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
     const image = `bds-sat-visuals:${VERSION}`;
     const uid = `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`;
     const apiKey = readSecret("OPENROUTER_API_KEY");
+    const { brand } = ctx.cfg;
+    const base = JSON.parse(
+      readFileSync(join(PKG, "visuals", "mermaid_theme_override.json"), "utf8"),
+    ) as Record<string, unknown>;
     for (const d of drafts(ctx.db, ["ready", "gate_failed"], ctx.ids)) {
       const slug = slugOf(d.dir);
       dropStrayPreviews(d.dir);
@@ -274,7 +279,7 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
       for (const s of schemes) {
         if (existsSync(join(d.dir, s.file))) continue;
         try {
-          renderScheme(dockerCli, image, d.dir, uid, s.file, s.mermaid);
+          renderScheme(dockerCli, image, d.dir, uid, s.file, s.mermaid, { brand, base });
         } catch (err) {
           errorOf(ctx, `схема ${s.n}`, d.candidate_id, err);
         }
@@ -295,13 +300,13 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
           const img = await generatePreview({
             apiKey,
             models: [ctx.cfg.llm.models.image, "google/gemini-2.5-flash-image"],
-            prompt: preview.prompt,
+            prompt: brandPreviewPrompt(preview.prompt, brand),
           });
           // Расход пишем до сборки JPEG: картинка оплачена, даже если сборка упадёт.
           llm.charge("image", img.model, img.costUsd, d.candidate_id);
           const raw = `.work/${preview.file}.${img.ext}`;
           writeFileSync(join(d.dir, raw), img.bytes);
-          finalizePreview(dockerCli, image, d.dir, uid, raw, preview.file);
+          finalizePreview(dockerCli, image, d.dir, uid, raw, preview.file, brand.background);
         } catch (err) {
           if (err instanceof PreviewFailed && err.costUsd > 0) {
             llm.charge("image", ctx.cfg.llm.models.image, err.costUsd, d.candidate_id);

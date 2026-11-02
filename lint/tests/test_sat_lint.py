@@ -32,7 +32,6 @@ META = f"""# Метаданные статьи Потеря кворума KRaft
 - **ALT:** Три контроллера KRaft и брокер-наблюдатель
 
 ```mermaid
-%%{{init: {{'theme':'base', 'themeVariables': {{'primaryColor':'#294A70','secondaryColor':'#FFAB1F','tertiaryColor':'#F5F7FA'}}}}}}%%
 flowchart LR
   a --> b
 ```

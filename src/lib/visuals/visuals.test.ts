@@ -3,9 +3,18 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { Brand } from "../brand/brand.ts";
 import { parseVisuals } from "./meta.ts";
 import { generatePreview, PreviewFailed } from "./preview.ts";
 import { renderScheme, type Docker } from "./render.ts";
+
+const BRAND: Brand = {
+  primary: "#2F6F73",
+  accent: "#A9CBD4",
+  background: "#F4F8F9",
+  text: "#232C3D",
+};
+const THEME = { brand: BRAND, base: { themeVariables: { fontSize: "26px" } } };
 
 const META = `# Метаданные статьи X
 
@@ -76,8 +85,17 @@ test("рендер схемы: mmdc с конфигами форка, JPG 1200x8
     "1001:1001",
     "s_scheme1.jpg",
     "flowchart LR\n a-->b",
+    THEME,
   );
-  assert.equal(readFileSync(join(dir, "s_scheme1.jpg.mmd"), "utf8"), "flowchart LR\n a-->b\n");
+  assert.equal(
+    readFileSync(join(dir, "s_scheme1.jpg.mmd"), "utf8"),
+    "flowchart LR\n a-->b\n  classDef accent fill:#A9CBD4,stroke:#2F6F73,color:#232C3D;\n",
+  );
+  const conf = JSON.parse(readFileSync(join(dir, "s_scheme1.jpg.mermaid.json"), "utf8"));
+  assert.equal(conf.theme, "base");
+  assert.equal(conf.themeVariables.fontSize, "26px");
+  assert.equal(conf.themeVariables.primaryColor, "#2F6F73");
+  assert.match(conf.themeCSS, /color: #232C3D/);
   const cmd = calls[0].at(-1)!;
   assert.deepEqual(calls[0].slice(0, 7), [
     "run",
@@ -90,9 +108,12 @@ test("рендер схемы: mmdc с конфигами форка, JPG 1200x8
   ]);
   assert.match(
     cmd,
-    /mmdc -i s_scheme1\.jpg\.mmd .* -c \/visuals\/mermaid_theme_override\.json -s 3/,
+    /mmdc -i s_scheme1\.jpg\.mmd -o s_scheme1\.jpg\.png -b '#F4F8F9' .* -c s_scheme1\.jpg\.mermaid\.json -s 3/,
   );
-  assert.match(cmd, /-resize '1200x800>' -quality 95 s_scheme1\.jpg/);
+  assert.match(
+    cmd,
+    /-background '#F4F8F9' -flatten -resize '1200x800>' -quality 95 s_scheme1\.jpg/,
+  );
   assert.match(cmd, /exiftool -q -overwrite_original -all= s_scheme1\.jpg/);
 });
 
@@ -100,7 +121,7 @@ test("рендер схемы: ошибка mmdc — исключение с х�
   const dir = mkdtempSync(join(tmpdir(), "vis-"));
   const docker: Docker = () => ({ rc: 1, out: "Parse error on line 2\nExpecting 'SEMI'" });
   assert.throws(
-    () => renderScheme(docker, "img", dir, "1:1", "f.jpg", "bad"),
+    () => renderScheme(docker, "img", dir, "1:1", "f.jpg", "bad", THEME),
     /Parse error on line 2/,
   );
 });

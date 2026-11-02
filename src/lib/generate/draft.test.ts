@@ -12,7 +12,7 @@ import { writeDraft } from "./draft.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..");
 const cfg = parseSiteConfig(
-  "site: {id: kafka, domain: kafka-school.ru}\nselect: {keywords: [kafka], maxFetches: 3}\n",
+  "site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}\nselect: {keywords: [kafka], maxFetches: 3}\n",
 );
 const LONG = `<html><body><article><p>${"Kafka KRaft контроллеры и кворум. ".repeat(80)}</p></article></body></html>`;
 

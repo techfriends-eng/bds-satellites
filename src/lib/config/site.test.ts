@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { expandHome, parseSiteConfig } from "./site.ts";
 
 const YAML = `
-site: {id: kafka, domain: kafka-school.ru}
+site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}
 courses: [{title: DEVKI, path: /courses/apache-kafka-developers/}]
 sources:
   - {id: aiven, kind: blog, title: Aiven, url: "https://aiven.io/blog/feed.xml"}

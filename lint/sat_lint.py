@@ -436,12 +436,10 @@ def check_images(html: str, meta: str, report: Report) -> None:
                      f"{len(files)} картинок, все есть в meta", f"нет описания: {orphans}")
 
         schemes = len(re.findall(r"^### Схема", meta, flags=re.M))
-        mermaid_blocks = len(re.findall(r"%%\{init:", meta))
+        mermaid_blocks = len(re.findall(r"^```mermaid\s*$", meta, flags=re.M))
         report.check(schemes == mermaid_blocks and mermaid_blocks > 0, "Код Mermaid у каждой схемы",
                      f"{schemes} схем, {mermaid_blocks} блоков Mermaid",
                      f"{schemes} схем против {mermaid_blocks} блоков Mermaid")
-        colors = all(c in meta for c in ("#294A70", "#FFAB1F", "#F5F7FA"))
-        report.check(colors, "Фирменные цвета в схемах", "есть", "init-блок без палитры A8")
 
 
 def check_code_blocks(html: str, report: Report) -> None:

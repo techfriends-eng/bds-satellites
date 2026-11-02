@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { parse } from "yaml";
+import { parseBrand, type Brand } from "../brand/brand.ts";
 
 /** Конфиг сайта-спутника: `config/site.yaml` в репо сайта (bds-sat-<site>). */
 
@@ -15,6 +16,7 @@ export type DocSource = { title: string; base: string; pages: string[] };
 export type SiteConfig = {
   siteId: string;
   domain: string;
+  brand: Brand;
   topics: string[];
   courses: Course[];
   sources: Source[];
@@ -111,6 +113,7 @@ export function parseSiteConfig(text: string): SiteConfig {
   return {
     siteId: raw.site.id,
     domain: raw.site.domain,
+    brand: parseBrand(raw.brand),
     topics: (raw.topics as string[] | undefined) ?? [],
     courses: (raw.courses as Course[] | undefined) ?? [],
     sources,

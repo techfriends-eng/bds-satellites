@@ -29,7 +29,7 @@ test("раннер по-настоящему: run.sh, затем файл с в�
 function setup() {
   const base = mkdtempSync(join(tmpdir(), "sat-"));
   const cfg = parseSiteConfig(
-    `site: {id: kafka, domain: kafka-school.ru}\nselect: {keywords: [kafka]}\nstand: {base: ${base}/runs, maxFixes: 2}\n`,
+    `site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}\nselect: {keywords: [kafka]}\nstand: {base: ${base}/runs, maxFixes: 2}\n`,
   );
   const dir = join(base, "drafts", "s1");
   mkdirSync(join(dir, ".work"), { recursive: true });

@@ -10,7 +10,7 @@ import { openState } from "../store/db.ts";
 import { gateNote, publishDraft, withUtm } from "./wp.ts";
 
 const cfg = parseSiteConfig(
-  "site: {id: kafka, domain: kafka-school.ru}\nselect: {keywords: [kafka]}\npublish: {categories: [127]}\n",
+  "site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}\nselect: {keywords: [kafka]}\npublish: {categories: [127]}\n",
 );
 
 test("UTM только на курсы своего сайта", () => {

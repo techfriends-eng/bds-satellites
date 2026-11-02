@@ -5,7 +5,7 @@ import { parseSiteConfig } from "../config/site.ts";
 import { render } from "./render.ts";
 
 const cfg = parseSiteConfig(
-  "site: {id: kafka, domain: kafka-school.ru}\nselect: {keywords: [kafka]}\n",
+  "site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}\nselect: {keywords: [kafka]}\n",
 );
 const dir = join(import.meta.dirname, "__fixtures__");
 
@@ -23,7 +23,7 @@ test("промпт: подстановка, буквальные скобки, �
 test("промпт плана: адреса документации из конфига", () => {
   const root = join(import.meta.dirname, "..", "..", "..", "prompts");
   const withDocs = parseSiteConfig(
-    "site: {id: kafka, domain: kafka-school.ru}\nselect: {keywords: [kafka]}\ndocs:\n  - { title: Kafka 4.3, base: 'https://kafka.apache.org/43/', pages: [apis/, security/] }\n  - { title: Ray, base: 'https://docs.ray.io/en/latest/' }\n",
+    "site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}\nselect: {keywords: [kafka]}\ndocs:\n  - { title: Kafka 4.3, base: 'https://kafka.apache.org/43/', pages: [apis/, security/] }\n  - { title: Ray, base: 'https://docs.ray.io/en/latest/' }\n",
   );
   const fields = { meta: "", source: "", sat_delta: "" };
   const { system } = render(root, "plan", withDocs, fields);
