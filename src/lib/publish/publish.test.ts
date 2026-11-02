@@ -115,8 +115,8 @@ test("публикация: картинки в медиатеку, превью
       assert.ok(i.contentHtml.includes("utm_campaign=s1"));
       return { id: 9200, link: "https://kafka-school.ru/?p=9200", slug: "s1", status: "draft" };
     },
-    updateEntry: async (id: number) => {
-      calls.push(`update ${id}`);
+    updateEntry: async (id: number, i: { featuredMedia?: number }) => {
+      calls.push(`update ${id} featured=${i.featuredMedia}`);
       return { id, link: "https://kafka-school.ru/?p=9200", slug: "s1", status: "draft" };
     },
   } as unknown as WpClient;
@@ -128,7 +128,7 @@ test("публикация: картинки в медиатеку, превью
     "media s1_scheme1.jpg",
     "media s1_preview.jpg",
     "create draft featured=102 cat=127",
-    "update 9200",
+    "update 9200 featured=102",
   ]);
 
   const row = articleRow(db, cfg, 5);

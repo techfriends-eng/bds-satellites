@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parseVisuals } from "./meta.ts";
-import { generatePreview } from "./preview.ts";
+import { generatePreview, PreviewFailed } from "./preview.ts";
 import { renderScheme, type Docker } from "./render.ts";
 
 const META = `# Метаданные статьи X
@@ -136,6 +136,79 @@ test("превью: запасная модель маршрутом fallback, �
   assert.deepEqual(sent.models, ["a", "b"]);
   assert.equal(sent.route, "fallback");
   assert.deepEqual(sent.modalities, ["image", "text"]);
+});
+
+function imageFake(answers: { status?: number; body: string }[]) {
+  const sent: string[][] = [];
+  const fake = (async (_url: string, init: RequestInit) => {
+    sent.push((JSON.parse(String(init.body)) as { models: string[] }).models);
+    const a = answers[sent.length - 1];
+    return new Response(a.body, { status: a.status ?? 200 });
+  }) as unknown as typeof fetch;
+  return { fake, sent };
+}
+const NO_IMAGE = `${" ".repeat(400)}${JSON.stringify({
+  model: "m",
+  usage: { cost: 0.01 },
+  choices: [{ finish_reason: "stop", message: { content: "не могу" } }],
+})}`;
+const IMAGE = JSON.stringify({
+  usage: { cost: 0.04 },
+  choices: [{ message: { images: [{ image_url: { url: "data:image/png;base64,UE5H" } }] } }],
+});
+const noSleep = async () => {};
+
+test("превью: ответ без картинки повторяется со следующей модели, расход суммируется", async () => {
+  const { fake, sent } = imageFake([{ body: NO_IMAGE }, { body: IMAGE }]);
+  const r = await generatePreview({
+    apiKey: "k",
+    models: ["a", "b"],
+    prompt: "p",
+    fetch: fake,
+    sleep: noSleep,
+  });
+  assert.deepEqual(sent, [
+    ["a", "b"],
+    ["b", "a"],
+  ]);
+  assert.equal(r.costUsd, 0.05);
+});
+
+test("превью: три ответа без картинки — ошибка с причиной и расходом, а не пробелы", async () => {
+  const { fake, sent } = imageFake([{ body: NO_IMAGE }, { body: NO_IMAGE }, { body: NO_IMAGE }]);
+  await assert.rejects(
+    generatePreview({ apiKey: "k", models: ["a", "b"], prompt: "p", fetch: fake, sleep: noSleep }),
+    (e: unknown) =>
+      e instanceof PreviewFailed &&
+      /в ответе нет картинки \(m; stop; не могу\)/.test(e.message) &&
+      Math.abs(e.costUsd - 0.03) < 1e-9,
+  );
+  assert.equal(sent.length, 3);
+});
+
+test("превью: 402 не повторяется, 502 повторяется", async () => {
+  const empty = imageFake([{ status: 402, body: '{"error":{"message":"balance"}}' }]);
+  await assert.rejects(
+    generatePreview({
+      apiKey: "k",
+      models: ["a"],
+      prompt: "p",
+      fetch: empty.fake,
+      sleep: noSleep,
+    }),
+    /HTTP 402/,
+  );
+  assert.equal(empty.sent.length, 1);
+  const flaky = imageFake([{ status: 502, body: "bad gateway" }, { body: IMAGE }]);
+  const r = await generatePreview({
+    apiKey: "k",
+    models: ["a"],
+    prompt: "p",
+    fetch: flaky.fake,
+    sleep: noSleep,
+  });
+  assert.equal(flaky.sent.length, 2);
+  assert.equal(r.costUsd, 0.04);
 });
 
 test("метаданные: отклонения модели — превью под ##, промпт строкой, без маркеров", () => {

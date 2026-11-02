@@ -21,7 +21,7 @@
     "prepare": "npm run build"
   },
   "dependencies": {
-    "@techfriends-eng/toolkit": "github:techfriends-eng/toolkit#v0.6.1",
+    "@techfriends-eng/toolkit": "github:techfriends-eng/toolkit#v0.6.2",
     "pg": "8.13.1",
     "yaml": "2.6.1"
   },

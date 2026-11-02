@@ -13,7 +13,7 @@ import { parseVisuals } from "../visuals/meta.ts";
  * получают UTM. Статья с другим провалом проверок уходит черновиком, причины — комментарием в начале.
  * Провал стиля (двоеточия, тире, заголовок и другие из STYLE_ITEMS линтера) не публикуется и не
  * обновляет уже созданный пост. Стиль проверяется заново: gates.json мог устареть с прошлого релиза.
- * Повторная публикация обновляет тот же пост (drafts.wp_post_id).
+ * Повторная публикация обновляет тот же пост (drafts.wp_post_id) и ставит обложку, если она появилась.
  */
 export function withUtm(html: string, domain: string, slug: string): string {
   const q = new URLSearchParams({ utm_source: "sat", utm_medium: "article", utm_campaign: slug });
@@ -88,7 +88,11 @@ export async function publishDraft(
   const content = gateNote(report) + withUtm(html, cfg.domain, slug);
   const title = titleOf(meta, slug);
   const entry = draft.wp_post_id
-    ? await wp.updateEntry(draft.wp_post_id, { title, contentHtml: content }, creds)
+    ? await wp.updateEntry(
+        draft.wp_post_id,
+        { title, contentHtml: content, featuredMedia: featured },
+        creds,
+      )
     : await wp.createEntry(
         {
           title,

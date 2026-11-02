@@ -62,6 +62,8 @@ test("прогон: упал → починка через LLM меняет ко
   };
   const llm: Llm = {
     spent: () => 0,
+    exhausted: () => false,
+    charge: () => {},
     ask: async (stage, _s, user) => {
       assert.equal(stage, "fix");
       assert.match(user, /boom/);
@@ -91,7 +93,12 @@ test("прогон: упал → починка через LLM меняет ко
 test("прогон: починки кончились — run_failed, вывод не вставлен", async () => {
   const { cfg, db, dir } = setup();
   const exec: Exec = () => ({ rc: 1, out: "boom", seconds: 1 });
-  const llm: Llm = { spent: () => 0, ask: async () => '{"cause": "?", "files": {}}' };
+  const llm: Llm = {
+    spent: () => 0,
+    exhausted: () => false,
+    charge: () => {},
+    ask: async () => '{"cause": "?", "files": {}}',
+  };
   const ok = await checkDraft(
     { db, cfg, llm, promptDirs: [join(ROOT, "prompts")], exec },
     { candidate_id: 5, dir },

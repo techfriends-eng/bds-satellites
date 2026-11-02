@@ -20,6 +20,8 @@ function fakeLlm(answers: Partial<Record<Stage, string>>) {
   const asked: { stage: Stage; system: string; user: string }[] = [];
   const llm: Llm = {
     spent: () => 0,
+    exhausted: () => false,
+    charge: () => {},
     ask: async (stage, system, user) => {
       asked.push({ stage, system, user });
       return answers[stage] ?? "";
@@ -214,6 +216,8 @@ test("черновик: write упал — следующий прогон бе�
   const row = () => db.prepare("SELECT * FROM candidates WHERE id = 13").get() as never;
   const failing: Llm = {
     spent: () => 0,
+    exhausted: () => false,
+    charge: () => {},
     ask: async (stage) => {
       if (stage === "plan") return plan;
       throw new Error("write: модель не ответила после повторов");

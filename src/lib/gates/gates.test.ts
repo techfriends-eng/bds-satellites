@@ -72,7 +72,12 @@ function setup(html: string) {
 }
 
 function deps(db: ReturnType<typeof openState>, answers: Partial<Record<Stage, string>>): GateDeps {
-  const llm: Llm = { spent: () => 0, ask: async (stage) => answers[stage] ?? "" };
+  const llm: Llm = {
+    spent: () => 0,
+    exhausted: () => false,
+    charge: () => {},
+    ask: async (stage) => answers[stage] ?? "",
+  };
   return {
     db,
     cfg,
@@ -133,6 +138,8 @@ test("доводка: стенд с прошлого раза не прошёл 
   );
   d.llm = {
     spent: () => 0,
+    exhausted: () => false,
+    charge: () => {},
     ask: async (stage) => (
       stages.push(stage),
       stage === "review" ? '{"issues": [{"severity": "high", "quote": "q", "problem": "p"}]}' : ""

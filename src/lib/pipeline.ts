@@ -22,7 +22,7 @@ import { checkDraft } from "./stand/check.ts";
 import { CANDIDATE_COLS, openState, type Db } from "./store/db.ts";
 import { loadStyle } from "./style/rules.ts";
 import { parseVisuals } from "./visuals/meta.ts";
-import { generatePreview } from "./visuals/preview.ts";
+import { generatePreview, PreviewFailed } from "./visuals/preview.ts";
 import { dockerCli, finalizePreview, renderScheme } from "./visuals/render.ts";
 
 /**
@@ -44,6 +44,14 @@ export const STEPS = [
 ] as const;
 export type Step = (typeof STEPS)[number];
 
+/**
+ * Прогон начинает с визуализаций: обложки, что ждут с прошлого раза, получают деньги раньше новых статей.
+ * Прогон у потолка иначе оставляет их без превью снова (kafka 2 ноября, $3,12 ушло до шага visuals).
+ */
+export const RUN_STEPS: Step[] = ["visuals", ...STEPS];
+/** После потолка идут только шаги без платных вызовов: схемы и публикация уже готового. */
+const AFTER_CEILING = new Set<Step>(["visuals", "publish"]);
+
 const PKG = process.env.SAT_PKG_DIR ?? join(import.meta.dirname, "..", "..");
 /** Сырые превью модели в корне черновика (до v0.1.16, в т. ч. «.jpg.raw» v0.1.10) линтер считает лишними файлами. */
 function dropStrayPreviews(dir: string): void {
@@ -62,6 +70,8 @@ type Ctx = {
   draftsDir: string;
   manualDir: string;
   ids?: number[];
+  /** Превью, что не вышло в этом прогоне: второй проход visuals за него не платит. */
+  previewFailed: Set<number>;
 };
 
 /** Сколько нечитаемых кандидатов заменять за прогон: ниже — следующий прогон. */
@@ -106,7 +116,36 @@ function drafts(db: Db, statuses: string[], ids?: number[]) {
 function errorOf(ctx: Ctx, step: string, id: number, err: unknown): void {
   if (err instanceof BudgetExceeded) throw err;
   const list = (ctx.journal.stats.errors ??= []) as string[];
-  list.push(`${step} ${id}: ${(err as Error).message}`.slice(0, 300));
+  const line = `${step} ${id}: ${(err as Error).message}`.slice(0, 300);
+  if (!list.includes(line)) list.push(line); // visuals идёт дважды, сломанная схема — одна ошибка
+}
+
+/**
+ * Шаги по порядку. Потолок останавливает платные шаги, но готовое уходит в WP, а не ждёт следующего
+ * прогона. Любая другая ошибка останавливает прогон. Возвращает текст ошибки для журнала.
+ */
+export async function runSteps(
+  steps: Step[],
+  exec: (step: Step) => Promise<void>,
+  command: string,
+): Promise<string | null> {
+  let error: string | null = null;
+  let ceiling = false;
+  for (const step of steps) {
+    if (ceiling && !AFTER_CEILING.has(step)) continue;
+    try {
+      await exec(step);
+    } catch (err) {
+      error = (err as Error).message.slice(0, 500);
+      console.error(`sat ${command}: ${(err as Error).stack ?? error}`);
+      if (!(err instanceof BudgetExceeded)) {
+        process.exitCode = 1;
+        break;
+      }
+      ceiling = true;
+    }
+  }
+  return error;
 }
 
 const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
@@ -241,21 +280,33 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
         }
       }
       if (preview && !existsSync(join(d.dir, preview.file))) {
+        if (ctx.previewFailed.has(d.candidate_id)) continue;
+        const { llm } = ctx.gateDeps;
+        if (llm.exhausted()) {
+          errorOf(
+            ctx,
+            "превью",
+            d.candidate_id,
+            new Error("потолок прогона, ждёт следующий прогон"),
+          );
+          continue;
+        }
         try {
           const img = await generatePreview({
             apiKey,
             models: [ctx.cfg.llm.models.image, "google/gemini-2.5-flash-image"],
             prompt: preview.prompt,
           });
+          // Расход пишем до сборки JPEG: картинка оплачена, даже если сборка упадёт.
+          llm.charge("image", img.model, img.costUsd, d.candidate_id);
           const raw = `.work/${preview.file}.${img.ext}`;
           writeFileSync(join(d.dir, raw), img.bytes);
           finalizePreview(dockerCli, image, d.dir, uid, raw, preview.file);
-          ctx.db
-            .prepare(
-              "INSERT INTO llm_calls (at, stage, model, candidate_id, cost_usd) VALUES (?, 'image', ?, ?, ?)",
-            )
-            .run(new Date().toISOString(), img.model, d.candidate_id, img.costUsd);
         } catch (err) {
+          if (err instanceof PreviewFailed && err.costUsd > 0) {
+            llm.charge("image", ctx.cfg.llm.models.image, err.costUsd, d.candidate_id);
+          }
+          ctx.previewFailed.add(d.candidate_id);
           errorOf(ctx, "превью", d.candidate_id, err);
         }
       }
@@ -306,7 +357,7 @@ export async function main(argv: string[]): Promise<number> {
   }
   const steps: Step[] =
     command === "run"
-      ? [...STEPS]
+      ? RUN_STEPS
       : command === "sync"
         ? []
         : STEPS.includes(command as Step)
@@ -328,6 +379,7 @@ export async function main(argv: string[]): Promise<number> {
     ids,
     draftsDir: join(stateDir, "drafts"),
     manualDir: join(stateDir, "source-text"),
+    previewFailed: new Set(),
     gateDeps: {
       db,
       cfg,
@@ -343,14 +395,7 @@ export async function main(argv: string[]): Promise<number> {
     for (const d of drafts(db, ["drafted", "ran", "run_failed", "gate_failed", "ready"]))
       journal.touch(d.candidate_id);
   }
-  let error: string | null = null;
-  try {
-    for (const step of steps) await run[step](ctx);
-  } catch (err) {
-    error = (err as Error).message.slice(0, 500);
-    console.error(`sat ${command}: ${(err as Error).stack ?? error}`);
-    if (!(err instanceof BudgetExceeded)) process.exitCode = 1;
-  }
+  const error = await runSteps(steps, (step) => run[step](ctx), command);
   journal.stats.cost_usd = Math.round(llm.spent() * 1000) / 1000;
   const errs = journal.stats.errors as string[] | undefined;
   await journal.close(
