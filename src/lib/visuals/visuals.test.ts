@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Brand } from "../brand/brand.ts";
 import { parseVisuals } from "./meta.ts";
 import { generatePreview, PreviewFailed } from "./preview.ts";
-import { renderScheme, type Docker } from "./render.ts";
+import { forgetSchemes, renderScheme, type Docker } from "./render.ts";
 
 const BRAND: Brand = {
   primary: "#2F6F73",
@@ -247,4 +247,23 @@ test("VERSION совпадает с package.json: по нему тег обра�
   const pkg = join(import.meta.dirname, "../../..");
   const json = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8")) as { version: string };
   assert.equal(readFileSync(join(pkg, "VERSION"), "utf8").trim(), json.version);
+});
+
+test("сброс схем: файлы и записи схем уходят, превью и его запись остаются", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sat-forget-"));
+  mkdirSync(join(dir, ".work"));
+  for (const f of ["a_scheme1.jpg", "a_scheme2.jpg", "a_preview.jpg"])
+    writeFileSync(join(dir, f), "x");
+  const media = { id: 1, url: "u" };
+  writeFileSync(
+    join(dir, ".work", "media.json"),
+    JSON.stringify({ "a_scheme1.jpg": media, "a_preview.jpg": media }),
+  );
+  assert.deepEqual(forgetSchemes(dir).sort(), ["a_scheme1.jpg", "a_scheme2.jpg"]);
+  assert.ok(!existsSync(join(dir, "a_scheme1.jpg")));
+  assert.ok(existsSync(join(dir, "a_preview.jpg")));
+  assert.deepEqual(
+    Object.keys(JSON.parse(readFileSync(join(dir, ".work", "media.json"), "utf8"))),
+    ["a_preview.jpg"],
+  );
 });

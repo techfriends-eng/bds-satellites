@@ -9,8 +9,8 @@ import { loadSiteConfig, type SiteConfig } from "./config/site.ts";
 import { markBds, syncBds } from "./dedup/bds.ts";
 import { markRadar, TAKEN_SQL } from "./dedup/radar.ts";
 import { lint } from "./gates/checks.ts";
-import { finish, gate, slugOf, type GateDeps } from "./gates/run.ts";
-import { writeDraft, type Candidate } from "./generate/draft.ts";
+import { finish, gate, rework, slugOf, type GateDeps } from "./gates/run.ts";
+import { refreshSource, writeDraft, type Candidate } from "./generate/draft.ts";
 import { createJournal, type Journal, type Query } from "./journal/journal.ts";
 import { BudgetExceeded, createLlm, OPENROUTER } from "./llm/client.ts";
 import { publishDraft } from "./publish/wp.ts";
@@ -26,7 +26,7 @@ import { brandPreviewPrompt } from "./brand/brand.ts";
 import { brandYaml, checkBrand, fetchSiteColors, suggestBrand } from "./brand/homepage.ts";
 import { parseVisuals } from "./visuals/meta.ts";
 import { generatePreview, PreviewFailed } from "./visuals/preview.ts";
-import { dockerCli, finalizePreview, renderScheme } from "./visuals/render.ts";
+import { dockerCli, finalizePreview, forgetSchemes, renderScheme } from "./visuals/render.ts";
 
 /**
  * Конвейер сайта целиком и по шагам. Пути — из окружения юнита (deploy/bds-sat-<site>.env.example):
@@ -46,6 +46,13 @@ export const STEPS = [
   "publish",
 ] as const;
 export type Step = (typeof STEPS)[number];
+/** Команды автора над готовыми черновиками: только с id кандидатов, в недельный прогон не входят. */
+const DRAFT_COMMANDS = {
+  rework: ["rework", "rerender", "visuals", "publish"],
+  rerender: ["rerender", "visuals", "publish"],
+} as const;
+type DraftCommand = keyof typeof DRAFT_COMMANDS;
+type AnyStep = Step | DraftCommand;
 
 /**
  * Прогон начинает с визуализаций: обложки, что ждут с прошлого раза, получают деньги раньше новых статей.
@@ -53,7 +60,7 @@ export type Step = (typeof STEPS)[number];
  */
 export const RUN_STEPS: Step[] = ["visuals", ...STEPS];
 /** После потолка идут только шаги без платных вызовов: схемы и публикация уже готового. */
-const AFTER_CEILING = new Set<Step>(["visuals", "publish"]);
+const AFTER_CEILING = new Set<AnyStep>(["rerender", "visuals", "publish"]);
 
 const PKG = process.env.SAT_PKG_DIR ?? join(import.meta.dirname, "..", "..");
 /** Сырые превью модели в корне черновика (до v0.1.16, в т. ч. «.jpg.raw» v0.1.10) линтер считает лишними файлами. */
@@ -127,9 +134,9 @@ function errorOf(ctx: Ctx, step: string, id: number, err: unknown): void {
  * Шаги по порядку. Потолок останавливает платные шаги, но готовое уходит в WP, а не ждёт следующего
  * прогона. Любая другая ошибка останавливает прогон. Возвращает текст ошибки для журнала.
  */
-export async function runSteps(
-  steps: Step[],
-  exec: (step: Step) => Promise<void>,
+export async function runSteps<S extends AnyStep>(
+  steps: readonly S[],
+  exec: (step: S) => Promise<void>,
   command: string,
 ): Promise<string | null> {
   let error: string | null = null;
@@ -151,7 +158,7 @@ export async function runSteps(
   return error;
 }
 
-const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
+const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
   async collect(ctx) {
     const { db, cfg, journal } = ctx;
     const res = await collect(db, cfg, (url, timeout) => fetchText(url, timeout, 4_000_000));
@@ -319,6 +326,40 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
       }
     }
   },
+  async rework(ctx) {
+    const row = ctx.db.prepare("SELECT id, url, summary, body FROM candidates WHERE id = ?");
+    const list = (ctx.journal.stats.rework ??= []) as unknown[];
+    const statusOf = ctx.db.prepare("SELECT status FROM candidates WHERE id = ?");
+    for (const d of drafts(ctx.db, ["ready", "gate_failed", "ran", "run_failed"], ctx.ids)) {
+      const slug = slugOf(d.dir);
+      ctx.journal.touch(d.candidate_id);
+      try {
+        const cand = row.get(d.candidate_id) as Candidate;
+        const src = await refreshSource(
+          { manualDir: ctx.manualDir, getHtml: (u) => fetchText(u, 60_000, 2_000_000) },
+          cand,
+          d.dir,
+          slug,
+        );
+        if (!src.ok) {
+          errorOf(ctx, "rework", d.candidate_id, new Error(`исходник не прочитан: ${src.tried}`));
+          continue;
+        }
+        const ok = await rework(ctx.gateDeps, d, slug);
+        const { status } = statusOf.get(d.candidate_id) as { status: string };
+        list.push({ id: d.candidate_id, source_words: src.words, ok, status });
+      } catch (err) {
+        errorOf(ctx, "rework", d.candidate_id, err);
+      }
+    }
+  },
+  async rerender(ctx) {
+    const list = (ctx.journal.stats.rerender ??= []) as unknown[];
+    for (const d of drafts(ctx.db, ["ready", "gate_failed"], ctx.ids)) {
+      ctx.journal.touch(d.candidate_id);
+      list.push({ id: d.candidate_id, schemes: forgetSchemes(d.dir).length });
+    }
+  },
   async publish(ctx) {
     const wp = createWp({ baseUrl: readSecret("WP_URL") });
     const creds = { username: readSecret("WP_USER"), appPassword: readSecret("WP_APP_PASSWORD") };
@@ -399,17 +440,23 @@ export async function main(argv: string[]): Promise<number> {
     await note.close(await pgQuery(optionalSecret("SAT_DB_URL")), 0, rest.join(" ") || "note");
     return 0;
   }
-  const steps: Step[] =
-    command === "run"
+  const draftCommand = DRAFT_COMMANDS[command as DraftCommand] as readonly AnyStep[] | undefined;
+  if (draftCommand && !ids.length) {
+    console.error(`sat ${command}: нужны id кандидатов`);
+    return 2;
+  }
+  const steps: readonly AnyStep[] =
+    draftCommand ??
+    (command === "run"
       ? RUN_STEPS
       : command === "sync"
         ? []
         : STEPS.includes(command as Step)
           ? [command as Step]
-          : [];
+          : []);
   if (!steps.length && command !== "sync") {
     console.error(
-      `sat: неизвестная команда ${command}; есть run, sync, note, brand-check, brand-suggest, ${STEPS.join(", ")}`,
+      `sat: неизвестная команда ${command}; есть run, sync, note, rework, rerender, brand-check, brand-suggest, ${STEPS.join(", ")}`,
     );
     return 2;
   }

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { brandMermaid, mermaidConfig, type Brand } from "../brand/brand.ts";
 
@@ -52,6 +52,29 @@ export function renderScheme(
     uid,
     `mmdc -i ${mmd} -o ${png} -b '${bg}' -p /visuals/puppeteer-config.json -c ${conf} -s 3 && rm -f ${mmd} ${conf} && ${finalize(png, file, bg)}`,
   );
+}
+
+/**
+ * Забыть готовые схемы: файлы и их записи в media.json. Следующие visuals и publish нарисуют их заново
+ * и загрузят новыми файлами. Старые остаются в медиатеке WP. Превью не трогаем: оно платное.
+ */
+export function forgetSchemes(dir: string): string[] {
+  const isScheme = (f: string) => /_scheme\d+\.jpg$/.test(f);
+  const gone = readdirSync(dir).filter(isScheme);
+  for (const f of gone) rmSync(join(dir, f), { force: true });
+  const mediaFile = join(dir, ".work", "media.json");
+  if (existsSync(mediaFile)) {
+    const media = JSON.parse(readFileSync(mediaFile, "utf8")) as Record<string, unknown>;
+    writeFileSync(
+      mediaFile,
+      JSON.stringify(
+        Object.fromEntries(Object.entries(media).filter(([k]) => !isScheme(k))),
+        null,
+        1,
+      ),
+    );
+  }
+  return gone;
 }
 
 /** Превью из готового PNG/JPEG модели: тот же размер, фон и чистка метаданных (C2PA модели). */

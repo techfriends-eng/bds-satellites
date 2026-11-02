@@ -77,6 +77,25 @@ function markUnreadable(deps: DraftDeps, row: Candidate, words: number, tried: s
 }
 
 /**
+ * Заново читает исходник готового черновика в research.json. План и документация остаются.
+ * Текста нет — файл не меняется, возвращается то, что пробовали.
+ */
+export async function refreshSource(
+  deps: Pick<DraftDeps, "manualDir" | "getHtml">,
+  row: Pick<Candidate, "id" | "url" | "summary" | "body">,
+  dir: string,
+  slug: string,
+): Promise<{ words: number; tried: string; ok: boolean }> {
+  const read = await readSource(row, deps);
+  const tried = formatLog(read.log);
+  if (read.text === null) return { words: read.words, tried, ok: false };
+  const { research: path } = draftPaths(dir, slug);
+  const research = JSON.parse(readFileSync(path, "utf8")) as Research;
+  writeFileSync(path, JSON.stringify({ ...research, source: read.text, fetchLog: tried }));
+  return { words: read.words, tried, ok: true };
+}
+
+/**
  * Возвращает каталог черновика или null: план сказал «не брать» (status = rejected) либо текст исходника
  * получить не удалось (status = unreadable). LLM в последнем случае не вызывается.
  */

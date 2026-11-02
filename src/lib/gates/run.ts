@@ -82,8 +82,15 @@ export async function gate(deps: GateDeps, draft: Draft, slug: string): Promise<
   return report;
 }
 
-/** Одна правка. true — изменился код (нужен новый прогон). */
-export async function reviseOnce(deps: GateDeps, draft: Draft, slug: string): Promise<boolean> {
+/**
+ * Одна правка. true — изменился код (нужен новый прогон). `extra` — замечания сверх отчёта проверок.
+ */
+export async function reviseOnce(
+  deps: GateDeps,
+  draft: Draft,
+  slug: string,
+  extra: Issue[] = [],
+): Promise<boolean> {
   const paths = draftPaths(draft.dir, slug);
   const html = readFileSync(paths.html, "utf8");
   const meta = readFileSync(paths.meta, "utf8");
@@ -92,14 +99,16 @@ export async function reviseOnce(deps: GateDeps, draft: Draft, slug: string): Pr
     .filter(([k, v]) => !v.ok && k !== "review")
     .map(([k, v]) => `- ${k}: ${v.detail}`)
     .join("\n");
+  const r = research(draft.dir);
   const { system, user } = render(deps.promptDirs, "revise", deps.cfg, {
     lint: failedChecks || "- нет",
     issues: JSON.stringify(
-      report.review.filter((i) => i.severity !== "low"),
+      [...extra, ...report.review.filter((i) => i.severity !== "low")],
       null,
       1,
     ),
-    docs: research(draft.dir).docs || "(нет)",
+    source: r.source || "(нет)",
+    docs: r.docs || "(нет)",
     article: html,
     meta_md: meta,
     style_guide: deps.style.styleGuide,
@@ -155,6 +164,34 @@ export async function finish(deps: GateDeps, draft: Draft, slug: string): Promis
     i++
   ) {
     if (await reviseOnce(deps, draft, slug)) {
+      if (!(await checkDraft(deps, draft, slug))) return false;
+    }
+    if ((await gate(deps, draft, slug)).ok) return true;
+  }
+  return false;
+}
+
+/** Замечание первого круга переделки: прежний текст мог строиться на анонсе из ленты, а не на статье. */
+export const REWORK_ISSUE: Issue = {
+  severity: "high",
+  quote: "",
+  problem:
+    "Текст мог быть написан без полного текста исходника. Теперь исходник прочитан целиком и передан ниже.",
+  fix: "Сверь с исходником всё, что статья о нём говорит. Неверное исправь, важное из исходника добавь. Фразы о подготовке статьи и о том, что не удалось прочитать, убери.",
+};
+
+/**
+ * Переделка готового черновика по заново прочитанному исходнику (`sat rework`, команда автора).
+ * Правка идёт всегда, даже если проверки чистые: они не сравнивают текст с исходником. Потолок
+ * gates.maxRevisionsTotal здесь не действует, но прежние правки в журнале остаются, поэтому недельный
+ * прогон не докупает новые круги. Круг переделки ограничен gates.maxRevisions. true — статья прошла.
+ */
+export async function rework(deps: GateDeps, draft: Draft, slug: string): Promise<boolean> {
+  // Стенд мог не пройти раньше из-за самого стенда. Новый провал не отменяет правку текста.
+  if (!standOk(draft.dir)) await checkDraft(deps, draft, slug);
+  await gate(deps, draft, slug); // gates.json мог устареть с прошлого релиза, правке нужны свежие провалы
+  for (let i = 0; i < deps.cfg.gates.maxRevisions; i++) {
+    if (await reviseOnce(deps, draft, slug, i === 0 ? [REWORK_ISSUE] : [])) {
       if (!(await checkDraft(deps, draft, slug))) return false;
     }
     if ((await gate(deps, draft, slug)).ok) return true;
