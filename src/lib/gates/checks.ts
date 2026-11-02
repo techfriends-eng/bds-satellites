@@ -20,13 +20,13 @@ export function lint(
   slug: string,
   domain: string,
   key: string,
-): Check & { failed: string[] } {
+): Check & { failed: string[]; style: string[] } {
   const r = spawnSync(
     "python3",
     [lintPy, slug, "--profile", "sat", "--dir", dir, "--domain", domain, "--key", key, "--json"],
     { encoding: "utf8" },
   );
-  let report: { failed_items?: string[]; words?: number };
+  let report: { failed_items?: string[]; style_failed?: string[]; words?: number };
   try {
     report = JSON.parse(r.stdout);
   } catch {
@@ -34,13 +34,18 @@ export function lint(
       ok: false,
       detail: `линтер не отработал: ${r.stderr.slice(-300)}`,
       failed: ["линтер"],
+      style: ["линтер не отработал"], // стиль не проверен — не публикуем
     };
   }
   const failed = report.failed_items ?? [];
+  // Провалы стиля — с цитатами: переписыванию нужно видеть, какие именно двоеточия убрать.
+  const style = report.style_failed ?? [];
+  const other = failed.filter((f) => !style.some((s) => s.startsWith(`${f}:`)));
   return {
     ok: failed.length === 0,
-    detail: failed.length ? failed.join("; ") : `слов ${report.words}`,
+    detail: failed.length ? [...style, ...other].join("; ") : `слов ${report.words}`,
     failed,
+    style,
   };
 }
 

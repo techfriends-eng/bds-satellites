@@ -10,7 +10,9 @@ import { parseVisuals } from "../visuals/meta.ts";
 /**
  * Черновик в WordPress сайта через toolkit/wp. Пока статус всегда draft (publish.status).
  * Картинки (схемы и превью) — в медиатеку, TODO_IMAGE заменяется адресом. Ссылки на курсы
- * получают UTM. Не прошедшая проверки статья тоже уходит черновиком, причины — комментарием в начале.
+ * получают UTM. Статья с другим провалом проверок уходит черновиком, причины — комментарием в начале.
+ * Провал стиля (двоеточия, тире, заголовок и другие из STYLE_ITEMS линтера) не публикуется и не
+ * обновляет уже созданный пост. Стиль проверяется заново: gates.json мог устареть с прошлого релиза.
  * Повторная публикация обновляет тот же пост (drafts.wp_post_id).
  */
 export function withUtm(html: string, domain: string, slug: string): string {
@@ -38,12 +40,22 @@ export function titleOf(meta: string, fallback: string): string {
   return meta.match(/\*\*Заголовок статьи:\*\*\s*(.+)/)?.[1].trim() ?? fallback;
 }
 
+export type Published = { id: number; link: string; status: string };
+
 export async function publishDraft(
-  deps: { db: Db; cfg: SiteConfig; wp: WpClient; creds: WpCredentials },
+  deps: {
+    db: Db;
+    cfg: SiteConfig;
+    wp: WpClient;
+    creds: WpCredentials;
+    styleFailures: (dir: string, slug: string) => string[];
+  },
   draft: { id: number; candidate_id: number; dir: string; wp_post_id: number | null },
   slug: string,
-): Promise<{ id: number; link: string; status: string }> {
+): Promise<Published | { blocked: string[] }> {
   const { db, cfg, wp, creds } = deps;
+  const blocked = deps.styleFailures(draft.dir, slug);
+  if (blocked.length) return { blocked };
   const paths = draftPaths(draft.dir, slug);
   let html = readFileSync(paths.html, "utf8");
   const meta = readFileSync(paths.meta, "utf8");

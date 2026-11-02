@@ -8,6 +8,7 @@ import pg from "pg";
 import { loadSiteConfig, type SiteConfig } from "./config/site.ts";
 import { markBds, syncBds } from "./dedup/bds.ts";
 import { markRadar, TAKEN_SQL } from "./dedup/radar.ts";
+import { lint } from "./gates/checks.ts";
 import { finish, gate, slugOf, type GateDeps } from "./gates/run.ts";
 import { writeDraft, type Candidate } from "./generate/draft.ts";
 import { createJournal, type Journal, type Query } from "./journal/journal.ts";
@@ -263,10 +264,20 @@ const run: Record<Step, (ctx: Ctx) => Promise<void>> = {
   async publish(ctx) {
     const wp = createWp({ baseUrl: readSecret("WP_URL") });
     const creds = { username: readSecret("WP_USER"), appPassword: readSecret("WP_APP_PASSWORD") };
+    const styleFailures = (dir: string, slug: string) =>
+      lint(ctx.gateDeps.lintPy, dir, slug, ctx.cfg.domain, slug).style;
     for (const d of drafts(ctx.db, ["ready", "gate_failed"], ctx.ids)) {
       ctx.journal.touch(d.candidate_id);
       try {
-        await publishDraft({ db: ctx.db, cfg: ctx.cfg, wp, creds }, d, slugOf(d.dir));
+        const res = await publishDraft(
+          { db: ctx.db, cfg: ctx.cfg, wp, creds, styleFailures },
+          d,
+          slugOf(d.dir),
+        );
+        if ("blocked" in res) {
+          const list = (ctx.journal.stats.style_blocked ??= []) as unknown[];
+          list.push({ id: d.candidate_id, items: res.blocked.map((b) => b.slice(0, 200)) });
+        }
       } catch (err) {
         errorOf(ctx, "publish", d.candidate_id, err);
       }

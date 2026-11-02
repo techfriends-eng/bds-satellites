@@ -38,6 +38,35 @@ test("комментарий о провале: проверки и high-зам�
   assert.equal(gateNote({ ok: true, checks: {}, review: [] }), "");
 });
 
+test("провал стиля: ни картинок, ни нового поста, ни обновления старого", async () => {
+  const { db } = setup();
+  const touched: string[] = [];
+  const wp = new Proxy(
+    {},
+    {
+      get: (_t, name) => () => {
+        touched.push(String(name));
+        throw new Error("WP трогать нельзя");
+      },
+    },
+  ) as unknown as WpClient;
+  db.prepare("UPDATE drafts SET wp_post_id = 9197 WHERE id = 1").run();
+  const draft = db.prepare("SELECT * FROM drafts WHERE id = 1").get() as never;
+  const res = await publishDraft(
+    {
+      db,
+      cfg,
+      wp,
+      creds: { username: "u", appPassword: "p" },
+      styleFailures: () => ["Длинное тире: 2 шт"],
+    },
+    draft,
+    "s1",
+  );
+  assert.deepEqual(res, { blocked: ["Длинное тире: 2 шт"] });
+  assert.deepEqual(touched, []);
+});
+
 function setup() {
   const dir = join(mkdtempSync(join(tmpdir(), "pub-")), "s1");
   mkdirSync(join(dir, ".work"), { recursive: true });
@@ -93,8 +122,8 @@ test("публикация: картинки в медиатеку, превью
   } as unknown as WpClient;
   const creds = { username: "u", appPassword: "p" };
   const draft = () => db.prepare("SELECT * FROM drafts WHERE id = 1").get() as never;
-  await publishDraft({ db, cfg, wp, creds }, draft(), "s1");
-  await publishDraft({ db, cfg, wp, creds }, draft(), "s1");
+  await publishDraft({ db, cfg, wp, creds, styleFailures: () => [] }, draft(), "s1");
+  await publishDraft({ db, cfg, wp, creds, styleFailures: () => [] }, draft(), "s1");
   assert.deepEqual(calls, [
     "media s1_scheme1.jpg",
     "media s1_preview.jpg",

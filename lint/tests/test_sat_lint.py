@@ -69,10 +69,10 @@ def good_html() -> str:
     ])
 
 
-def run(html: str) -> dict:
+def run(html: str, meta: str = META) -> dict:
     with tempfile.TemporaryDirectory() as d:
         (Path(d) / f"{SLUG}.html").write_text(html, encoding="utf-8")
-        (Path(d) / f"{SLUG}_meta.md").write_text(META, encoding="utf-8")
+        (Path(d) / f"{SLUG}_meta.md").write_text(meta, encoding="utf-8")
         out = subprocess.run([sys.executable, str(LINT), SLUG, "--profile", "sat", "--dir", d,
                               "--domain", DOMAIN, "--key", "KRaft", "--json"],
                              capture_output=True, text=True, check=False)
@@ -103,6 +103,45 @@ class SatLint(unittest.TestCase):
             with self.subTest(phrase):
                 bad = good_html().replace("</p>", f" {phrase}</p>", 1)
                 self.assertIn("Подготовка статьи в тексте", run(bad)["failed_items"])
+
+    def test_body_colon_limit_is_zero(self) -> None:
+        res = run(good_html().replace("</p>", " Итог такой: кворум потерян.</p>", 1))
+        self.assertIn("Двоеточия в теле статьи", res["failed_items"])
+        self.assertTrue(any("Итог такой" in s for s in res["style_failed"]), res["style_failed"])
+
+    def test_service_colons_are_allowed(self) -> None:
+        html = good_html().replace(
+            "</p>", " Модель qwen2.5vl:7b отвечает за 12:30. Режимы такие:</p><ul><li>один</li><li>два</li></ul>", 1)
+        self.assertEqual(run(html)["failed_items"], [])
+
+    def test_post_title_is_checked(self) -> None:
+        for title in ("Потеря кворума: разбор", "Потеря кворума — разбор", "Потеря кворума – разбор",
+                      "Потеря кворума &mdash; разбор"):
+            with self.subTest(title):
+                meta = META.replace("Потеря кворума контроллеров KRaft", title)
+                self.assertIn("Заголовок статьи без двоеточия и тире", run(good_html(), meta)["failed_items"])
+        no_title = META.replace("- **Заголовок статьи:** Потеря кворума контроллеров KRaft\n", "")
+        self.assertIn("Заголовок статьи без двоеточия и тире", run(good_html(), no_title)["failed_items"])
+
+    def test_seo_title_is_checked(self) -> None:
+        meta = META.replace("Потеря кворума KRaft на практике", "KRaft: потеря кворума")
+        self.assertIn("SEO Title без двоеточия и тире", run(good_html(), meta)["failed_items"])
+
+    def test_disguised_dashes_fail(self) -> None:
+        for dash in ("&mdash;", "&#8212;", " – "):
+            with self.subTest(dash):
+                html = good_html().replace("</p>", f" кворум {dash} это большинство.</p>", 1)
+                self.assertIn("Длинное тире", run(html)["failed_items"])
+
+    def test_number_ranges_keep_en_dash(self) -> None:
+        html = good_html().replace("</p>", " Нужно 3–5 узлов.</p>", 1)
+        self.assertEqual(run(html)["failed_items"], [])
+
+    def test_only_style_items_block_publish(self) -> None:
+        self.assertEqual(run(good_html())["style_failed"], [])
+        short = run(good_html().replace("\n".join([PARA] * 70), PARA))  # объём не стиль
+        self.assertNotEqual(short["failed_items"], [])
+        self.assertEqual(short["style_failed"], [])
 
     def test_stand_results_are_allowed(self) -> None:
         html = good_html().replace(
