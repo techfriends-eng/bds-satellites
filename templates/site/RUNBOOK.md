@@ -51,6 +51,13 @@ ssh progon 'sudo -u bds-sat-__SITE__ -H bash -lc "cd /opt/bds-sat-__SITE__ && no
 Отказ при грязном дереве или без fast-forward. Откат: `git checkout <тег>` в `/opt/bds-sat-__SITE__`,
 `npm install`. Подъём версии пакета — правка тега в `package.json` отдельным коммитом.
 
+**SEO в WordPress (ToDo 99).** Метки из Keywords пишутся всегда (`publish.tags: true` по умолчанию). Поля Yoast
+пишутся только при `publish.seoMeta: true` и только после установки mu-плагина на сайт:
+`node_modules/bds-satellites/wp/mu-plugins/bds-rest-seo-meta.php` → `wp-content/mu-plugins/` сайта (доступ
+к хостингу у автора). Проверка: `curl -s -X OPTIONS https://__DOMAIN__/wp-json/wp/v2/posts` — в
+`schema.properties.meta` есть `_yoast_wpseo_title`. Без плагина при `seoMeta: true` публикация останавливается
+с ошибкой в журнале хаба, а не пишет SEO мимо.
+
 ## 7. Мониторинг и алерты
 
 - `OnFailure=alert@%n.service` — упал сам прогон, тревога в LOGS (toolkit monitoring на progon).

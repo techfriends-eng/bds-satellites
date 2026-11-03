@@ -21,7 +21,7 @@
     "prepare": "npm run build"
   },
   "dependencies": {
-    "@techfriends-eng/toolkit": "github:techfriends-eng/toolkit#v0.6.2",
+    "@techfriends-eng/toolkit": "github:techfriends-eng/toolkit#v0.7.0",
     "pg": "8.13.1",
     "yaml": "2.6.1"
   },
@@ -43,6 +43,7 @@
     "lint/sat_lint.py",
     "lint/wiki_unwrap.py",
     "visuals",
+    "wp",
     "ops",
     "VERSION"
   ]
