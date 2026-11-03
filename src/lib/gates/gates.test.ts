@@ -199,5 +199,6 @@ test("переделка: правка идёт и при чистых пров�
   assert.ok(prompts.length >= 1, "правка была, хотя потолок правок исчерпан");
   assert.ok(prompts[0].includes("ТЕКСТ ИСХОДНИКА"));
   assert.ok(prompts[0].includes(REWORK_ISSUE.problem));
+  assert.ok(prompts[0].includes("https://src/a"), "адрес исходника в промпте");
   assert.ok(readFileSync(join(dir, "s1.html"), "utf8").includes("настоящий вывод"));
 });
