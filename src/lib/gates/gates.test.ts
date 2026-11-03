@@ -7,7 +7,7 @@ import { parseSiteConfig } from "../config/site.ts";
 import type { Llm, Stage } from "../llm/client.ts";
 import { openState } from "../store/db.ts";
 import { loadStyle } from "../style/rules.ts";
-import { images, links, sourceLinked, uniqueness } from "./checks.ts";
+import { images, links, sourceLinked, sourceNumbers, sourceUse, uniqueness } from "./checks.ts";
 import { finish, gate, REWORK_ISSUE, reviseOnce, rework, type GateDeps } from "./run.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..");
@@ -229,4 +229,30 @@ test("переделка: правка идёт и при чистых пров�
   assert.ok(prompts[0].includes(REWORK_ISSUE.problem));
   assert.ok(prompts[0].includes("https://src/a"), "адрес исходника в промпте");
   assert.ok(readFileSync(join(dir, "s1.html"), "utf8").includes("настоящий вывод"));
+});
+
+test("ссылки: только идея из исходника — ссылка не нужна, цифры исходника в тексте её требуют", async () => {
+  const head = async () => 200;
+  assert.equal(sourceUse({}), "facts");
+  assert.equal(sourceUse({ source_use: "idea" }), "idea");
+  const noLink = "<p>Своя статья о KRaft на Kafka 4.3.2, замер 2026 года.</p>";
+  const src = "В посте автор получил 1840 сообщений в секунду и задержку 37 мс на Kafka 4.3.2.";
+  assert.equal((await links(noLink, "https://src/a", "kafka-school.ru", head)).ok, false);
+  const idea = await links(noLink, "https://src/a", "kafka-school.ru", head, {
+    use: "idea",
+    text: src,
+  });
+  assert.equal(idea.ok, true, idea.detail);
+  const taken = "<p>Автор получил 1840 сообщений в секунду и 37 мс.</p>";
+  const bad = await links(taken, "https://src/a", "kafka-school.ru", head, {
+    use: "idea",
+    text: src,
+  });
+  assert.equal(bad.ok, false);
+  assert.match(bad.detail, /1840, 37/);
+  // Число из своего вывода стенда или из документации — не из исходника.
+  const ours =
+    '<p>У нас 1840 и 37.</p><pre class="EnlighterJSRAW" data-enlighter-language="generic">1840 msg/s 37 ms</pre>';
+  assert.deepEqual(sourceNumbers(ours, src, ""), []);
+  assert.deepEqual(sourceNumbers(taken, src, "1840"), ["37"]);
 });

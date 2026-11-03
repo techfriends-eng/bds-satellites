@@ -91,14 +91,57 @@ export function sourceLinked(html: string, sourceUrl: string): boolean {
   return [...html.matchAll(/href="([^"]+)"/g)].some((m) => norm(m[1]) === want);
 }
 
+/**
+ * Что взято из исходника (план, поле source_use). `idea` — только идея: ссылка не нужна (задача 101,
+ * решение автора 2026-11-03). `facts` или нет поля (черновики до этого правила) — цифры, цитаты или
+ * структура: ссылка обязательна.
+ */
+export type SourceUse = "idea" | "facts";
+
+export function sourceUse(plan: { source_use?: unknown }): SourceUse {
+  return plan.source_use === "idea" ? "idea" : "facts";
+}
+
+/**
+ * Числа статьи, которые есть в исходнике, но не в документации и не в выводе стенда: значит, цифры
+ * взяты из исходника. Годы, однозначные числа и версии (4.3.2) не считаются: они общие и мало что
+ * доказывают.
+ */
+export function sourceNumbers(html: string, source: string, known: string): string[] {
+  const nums = (t: string) =>
+    new Set(
+      [...t.replace(/&nbsp;/g, " ").matchAll(/(?<![\w.])\d+(?:[.,]\d+)?(?:\s?%)?(?![\w.]*\d)/g)]
+        .map((m) => m[0].replace(/\s/g, "").replace(",", "."))
+        .filter((n) => n.replace(/[^\d]/g, "").length >= 2 && !/^(19|20)\d\d$/.test(n)),
+    );
+  const outputs = [...html.matchAll(/data-enlighter-language="generic"[^>]*>([\s\S]*?)<\/pre>/g)]
+    .map((m) => m[1])
+    .join("\n");
+  const mine = nums(stripForText(html));
+  const theirs = nums(source);
+  const ours = nums(`${known}\n${outputs}`);
+  return [...mine].filter((n) => theirs.has(n) && !ours.has(n)).sort();
+}
+
 export async function links(
   html: string,
   sourceUrl: string,
   domain: string,
   head: Head,
+  src: { use?: SourceUse; text?: string; known?: string } = {},
 ): Promise<Check> {
   const problems: string[] = [];
-  if (!sourceLinked(html, sourceUrl)) problems.push("нет ссылки на исходник");
+  const use = src.use ?? "facts";
+  if (use === "facts") {
+    if (!sourceLinked(html, sourceUrl)) problems.push("нет ссылки на исходник");
+  } else if (!sourceLinked(html, sourceUrl)) {
+    // Только идея: ссылка не нужна, но цифры исходника в тексте выдают, что взята не только идея.
+    const taken = sourceNumbers(html, src.text ?? "", src.known ?? "");
+    if (taken.length >= 2)
+      problems.push(
+        `в плане взята только идея, но в тексте цифры исходника (${taken.slice(0, 5).join(", ")}): нужна ссылка на исходник`,
+      );
+  }
   const urls = [...new Set([...html.matchAll(/href="(https?:\/\/[^"]+)"/g)].map((m) => m[1]))];
   for (const u of urls.filter((x) => !x.includes(domain))) {
     try {
