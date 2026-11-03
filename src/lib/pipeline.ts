@@ -24,6 +24,7 @@ import { loadStyle } from "./style/rules.ts";
 import { parse } from "yaml";
 import { brandPreviewPrompt } from "./brand/brand.ts";
 import { brandYaml, checkBrand, fetchSiteColors, suggestBrand } from "./brand/homepage.ts";
+import { jpegRatio, MAX_RATIO } from "./visuals/layout.ts";
 import { parseVisuals } from "./visuals/meta.ts";
 import { generatePreview, PreviewFailed } from "./visuals/preview.ts";
 import { dockerCli, finalizePreview, forgetSchemes, renderScheme } from "./visuals/render.ts";
@@ -289,6 +290,17 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
         if (existsSync(join(d.dir, s.file))) continue;
         try {
           renderScheme(dockerCli, image, d.dir, uid, s.file, s.mermaid, { brand, base });
+          // Страховка после рендера: проверка gates видит код, а не картинку (ToDo 103).
+          const ratio = jpegRatio(readFileSync(join(d.dir, s.file)));
+          if (ratio && ratio > MAX_RATIO)
+            errorOf(
+              ctx,
+              `схема ${s.n}`,
+              d.candidate_id,
+              new Error(
+                `вертикальная картинка, высота к ширине ${ratio.toFixed(2)} > ${MAX_RATIO}`,
+              ),
+            );
         } catch (err) {
           errorOf(ctx, `схема ${s.n}`, d.candidate_id, err);
         }
