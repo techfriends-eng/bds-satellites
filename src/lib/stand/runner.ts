@@ -59,6 +59,30 @@ export function badNames(files: Map<string, string>): string[] {
   return [...files.keys()].filter((n) => !SAFE_NAME.test(n) || normalize(n).startsWith(".."));
 }
 
+const CLEANUP_IMAGE = "busybox:1.37.0";
+
+/**
+ * Каталог прогона с нуля. Код статьи с bind-mount в compose (`.:/app`) оставляет файлы root, а у
+ * пользователя сайта нет sudo: такие файлы стирает контейнер, docker пользователю сайта доступен.
+ */
+export function clearWork(work: string, exec: Exec): void {
+  try {
+    rmSync(work, { recursive: true, force: true });
+    return;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code !== "EACCES" && code !== "EPERM") throw e;
+  }
+  const r = exec(
+    `docker run --rm -v "${work}:/w" ${CLEANUP_IMAGE} sh -c 'rm -rf /w/* /w/.[!.]* /w/..?*'`,
+    dirname(work),
+    process.env,
+    120_000,
+  );
+  if (r.rc !== 0) throw new Error(`не удалось очистить ${work}: ${r.out.trim().slice(-300)}`);
+  rmSync(work, { recursive: true, force: true });
+}
+
 export function runStand(
   work: string,
   project: string,
@@ -67,7 +91,7 @@ export function runStand(
   exec: Exec = shellExec,
   pyRun = "",
 ): RunResults {
-  rmSync(work, { recursive: true, force: true });
+  clearWork(work, exec);
   mkdirSync(work, { recursive: true });
   for (const [name, body] of files) {
     mkdirSync(dirname(join(work, name)), { recursive: true });

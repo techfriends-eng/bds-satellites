@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -7,7 +14,7 @@ import { parseSiteConfig } from "../config/site.ts";
 import type { Llm } from "../llm/client.ts";
 import { openState } from "../store/db.ts";
 import { checkDraft } from "./check.ts";
-import { commandFor, runStand, shellExec, type Exec } from "./runner.ts";
+import { clearWork, commandFor, runStand, shellExec, type Exec } from "./runner.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..");
 const pre = (lang: string, body: string) =>
@@ -24,6 +31,22 @@ test("раннер по-настоящему: run.sh, затем файл с в�
   assert.equal(res["t.py"].rc, 3);
   assert.equal(res["t.py"].out.trim(), "task");
   assert.equal(res._down, undefined, "без compose.yaml стенд не гасится");
+});
+
+test("раннер: каталог с недоступными файлами чистит контейнер", () => {
+  const work = join(mkdtempSync(join(tmpdir(), "stand-")), "p");
+  mkdirSync(join(work, ".venv"), { recursive: true });
+  writeFileSync(join(work, ".venv", "x"), "root");
+  chmodSync(join(work, ".venv"), 0o555);
+  const cmds: string[] = [];
+  const exec: Exec = (cmd) => {
+    cmds.push(cmd);
+    if (cmd.startsWith("docker run")) chmodSync(join(work, ".venv"), 0o755);
+    return { rc: 0, out: "", seconds: 0 };
+  };
+  clearWork(work, exec);
+  assert.equal(existsSync(work), false);
+  assert.match(cmds[0], /^docker run --rm -v ".*\/p:\/w" busybox:1\.37\.0 /);
 });
 
 function setup() {

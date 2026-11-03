@@ -124,6 +124,34 @@ test("правка: вывод возвращается настоящий, см
   assert.equal(await reviseOnce(deps(db, { revise: code }), { candidate_id: 5, dir }, "s1"), true);
 });
 
+test("правка: потерянная пометка вывода — повтор с замечанием, второй провал виден в ошибке", async () => {
+  const html = `<p>a</p>\n${pre("bash", "# run.sh\necho real")}\n<!-- output run.sh -->\n${pre("generic", "вывод")}`;
+  const { db, dir } = setup(html);
+  writeFileSync(
+    join(dir, ".work", "gates.json"),
+    JSON.stringify({ ok: false, checks: {}, review: [] }),
+  );
+  const lost = `=====ARTICLE=====\n<p>b</p>\n${pre("bash", "# run.sh\necho real")}\n=====META=====\n# m2`;
+  const good = `=====ARTICLE=====\n<p>c</p>\n${pre("bash", "# run.sh\necho real")}\n<!-- output run.sh -->\n${pre("generic", "x")}\n=====META=====\n# m3`;
+  const users: string[] = [];
+  const d = deps(db, {});
+  const answers = [lost, good];
+  d.llm.ask = async (_stage, _system, user) => {
+    users.push(user);
+    return answers.shift() ?? lost;
+  };
+  assert.equal(await reviseOnce(d, { candidate_id: 5, dir }, "s1"), false);
+  assert.equal(users.length, 2);
+  assert.match(users[1], /места вывода пропали run\.sh/);
+  assert.ok(readFileSync(join(dir, "s1.html"), "utf8").startsWith("<p>c</p>"));
+  assert.ok(readFileSync(join(dir, ".work", "revise.rejected.html"), "utf8").includes("<p>b</p>"));
+  d.llm.ask = async () => lost;
+  await assert.rejects(
+    reviseOnce(d, { candidate_id: 5, dir }, "s1"),
+    /места вывода пропали run\.sh/,
+  );
+});
+
 test("доводка: стенд с прошлого раза не прошёл — прогон заново до правки; потолок правок за все прогоны", async () => {
   const html = `<p>KRaft — лид <a href="https://src/a">исходник</a></p>\n${pre("bash", "# run.sh\necho fixed")}\n${pre("generic", "[[output run.sh]]")}`;
   const { db, dir } = setup(html);
