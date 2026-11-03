@@ -6,7 +6,7 @@ import { parseJson } from "../llm/client.ts";
 import { render } from "../prompts/render.ts";
 import type { Style } from "../style/rules.ts";
 import { checkDraft, type StandDeps } from "../stand/check.ts";
-import { images, links, lint, uniqueness, type Check, type Head } from "./checks.ts";
+import { images, links, lint, schemes, uniqueness, type Check, type Head } from "./checks.ts";
 
 /**
  * Проверки и переписывание. Линтер оформления, образы, ссылки, уникальность, смысловая проверка
@@ -66,6 +66,7 @@ export async function gate(deps: GateDeps, draft: Draft, slug: string): Promise<
       detail: html.includes("[[output") ? "остались места вывода без вывода" : "вывод вставлен",
     },
     images: images(parseArticle(html).files, cfg),
+    schemes: schemes(readFileSync(paths.meta, "utf8")),
     links: await links(html, cand.url, cfg.domain, deps.head),
     uniqueness: uniqueness(html, others, cfg.gates.maxShingleShare),
   };

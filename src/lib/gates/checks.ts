@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { words } from "../dedup/keys.ts";
 import type { SiteConfig } from "../config/site.ts";
+import { parseVisuals } from "../visuals/meta.ts";
+import { verticalProblem } from "../visuals/layout.ts";
 
 /** Проверки черновика без LLM. Каждая — { ok, detail }; провал любой — статья не готова. */
 export type Check = { ok: boolean; detail: string };
@@ -66,6 +68,19 @@ export function images(files: Map<string, string>, cfg: SiteConfig): Check {
   return {
     ok: problems.length === 0,
     detail: problems.join("; ") || [...used].sort().join(", ") || "образов нет",
+  };
+}
+
+/** Схемы горизонтальные, вертикаль только по исключениям ToDo 103 (visuals/layout.ts). */
+export function schemes(meta: string): Check {
+  const list = parseVisuals(meta).schemes;
+  const bad = list
+    .map((s) => [s.n, verticalProblem(s.mermaid)] as const)
+    .filter(([, p]) => p)
+    .map(([n, p]) => `схема ${n}: ${p}`);
+  return {
+    ok: bad.length === 0,
+    detail: bad.join("; ") || `схем ${list.length}, вертикальных без исключения нет`,
   };
 }
 
