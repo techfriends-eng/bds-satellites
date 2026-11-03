@@ -82,6 +82,35 @@ export async function gate(deps: GateDeps, draft: Draft, slug: string): Promise<
   return report;
 }
 
+type Parsed = ReturnType<typeof parseArticle>;
+
+/** Чем набор файлов и мест вывода правки отличается от прогнанного; пусто — совпадает. */
+export function setDrift(before: Parsed, after: Parsed): string {
+  const diff = (what: string, a: string[], b: string[]) => {
+    const lost = a.filter((x) => !b.includes(x));
+    const added = b.filter((x) => !a.includes(x));
+    return [
+      lost.length ? `${what} пропали ${lost.join(", ")}` : "",
+      added.length ? `${what} добавились ${added.join(", ")}` : "",
+    ];
+  };
+  return [
+    ...diff("файлы", [...before.files.keys()], [...after.files.keys()]),
+    ...diff("места вывода", before.outputs, after.outputs),
+  ]
+    .filter(Boolean)
+    .join("; ");
+}
+
+function setIssue(drift: string): Issue {
+  return {
+    severity: "high",
+    quote: "",
+    problem: `Прошлая правка изменила набор файлов кода или мест вывода (${drift}). Код уже прогнан на стенде, такую правку принять нельзя.`,
+    fix: "Сохрани все блоки кода с теми же именами файлов и все блоки вывода вместе с пометками <!-- output ИМЯ -->. Меняй только текст вокруг них.",
+  };
+}
+
 /**
  * Одна правка. true — изменился код (нужен новый прогон). `extra` — замечания сверх отчёта проверок.
  */
@@ -119,19 +148,22 @@ export async function reviseOnce(
     style_guide: deps.style.styleGuide,
     sat_delta: deps.style.satDelta,
   });
-  const next = splitAnswer(
-    await deps.llm.ask("revise", system, user, ARTICLE_MAX_TOKENS, draft.candidate_id),
-  );
   const before = parseArticle(html);
-  const after = parseArticle(next.article);
-  const sameSet = (a: Iterable<string>, b: Iterable<string>) =>
-    [...a].sort().join("\n") === [...b].sort().join("\n");
-  if (
-    !sameSet(before.files.keys(), after.files.keys()) ||
-    !sameSet(before.outputs, after.outputs)
-  ) {
-    throw new Error("правка сменила набор файлов или мест вывода");
+  let next = { article: "", meta: "" };
+  let after = before;
+  let drift = "";
+  // Модель иногда теряет блок кода или пометку <!-- output ИМЯ -->: один повтор с прямым замечанием.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const u = drift ? `${user}\n\n${JSON.stringify([setIssue(drift)], null, 1)}` : user;
+    next = splitAnswer(
+      await deps.llm.ask("revise", system, u, ARTICLE_MAX_TOKENS, draft.candidate_id),
+    );
+    after = parseArticle(next.article);
+    drift = setDrift(before, after);
+    if (!drift) break;
+    writeFileSync(join(paths.work, "revise.rejected.html"), next.article);
   }
+  if (drift) throw new Error(`правка сменила набор файлов или мест вывода: ${drift}`);
   // Вывод — только настоящий: возвращаем прежние блоки вывода, что бы ни написала модель.
   writeFileSync(paths.html, `${setOutputs(next.article, outputsOf(html))}\n`);
   writeFileSync(paths.meta, `${next.meta}\n`);
