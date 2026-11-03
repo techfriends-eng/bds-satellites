@@ -49,4 +49,7 @@ for try in 1 2 3 4; do
   sleep 3600
 done
 
-sat run
+# SAT_COMMAND — команда автора над черновиками через тот же юнит и lock: «rework 636», «rerender 11 15».
+# Без кавычек намеренно: команда и id разделяются пробелами.
+# shellcheck disable=SC2086
+sat ${SAT_COMMAND:-run}

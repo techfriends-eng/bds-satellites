@@ -8,7 +8,7 @@ import type { Llm, Stage } from "../llm/client.ts";
 import { openState } from "../store/db.ts";
 import { loadStyle } from "../style/rules.ts";
 import { images, links, sourceLinked, uniqueness } from "./checks.ts";
-import { finish, gate, reviseOnce, type GateDeps } from "./run.ts";
+import { finish, gate, REWORK_ISSUE, reviseOnce, rework, type GateDeps } from "./run.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..");
 const cfg = parseSiteConfig(
@@ -169,4 +169,35 @@ test("ссылки: исходник с utm и слэшем совпадает �
     async (u) => (u.includes("medium") ? 403 : 200),
   );
   assert.equal(r.ok, true, r.detail);
+});
+
+test("переделка: правка идёт и при чистых проверках, исходник в промпте, потолок за все прогоны не мешает", async () => {
+  const html = `<p>KRaft лид <a href="https://src/a">исходник</a></p>\n${pre("bash", "# run.sh\necho real")}\n<!-- output run.sh -->\n${pre("generic", "настоящий вывод")}`;
+  const { db, dir } = setup(html);
+  writeFileSync(
+    join(dir, ".work", "research.json"),
+    JSON.stringify({ source: "ТЕКСТ ИСХОДНИКА", docs: "док", plan: { key: "KRaft" } }),
+  );
+  writeFileSync(join(dir, ".work", "run.json"), JSON.stringify({ ok: true, log: [], results: {} }));
+  const add = db.prepare(
+    "INSERT INTO llm_calls (at, stage, model, candidate_id, cost_usd) VALUES ('x', 'revise', 'm', 5, 0)",
+  );
+  for (let i = 0; i < cfg.gates.maxRevisionsTotal; i++) add.run();
+  const prompts: string[] = [];
+  const d = deps(db, {});
+  d.llm = {
+    spent: () => 0,
+    exhausted: () => false,
+    charge: () => {},
+    ask: async (stage, _system, user) => {
+      if (stage !== "revise") return '{"issues": []}';
+      prompts.push(user);
+      return `=====ARTICLE=====\n${html}\n=====META=====\n# m2`;
+    },
+  };
+  await rework(d, { candidate_id: 5, dir }, "s1");
+  assert.ok(prompts.length >= 1, "правка была, хотя потолок правок исчерпан");
+  assert.ok(prompts[0].includes("ТЕКСТ ИСХОДНИКА"));
+  assert.ok(prompts[0].includes(REWORK_ISSUE.problem));
+  assert.ok(readFileSync(join(dir, "s1.html"), "utf8").includes("настоящий вывод"));
 });
