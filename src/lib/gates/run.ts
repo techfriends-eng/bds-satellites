@@ -66,7 +66,7 @@ export async function gate(deps: GateDeps, draft: Draft, slug: string): Promise<
       detail: html.includes("[[output") ? "остались места вывода без вывода" : "вывод вставлен",
     },
     images: images(parseArticle(html).files, cfg),
-    schemes: schemes(readFileSync(paths.meta, "utf8")),
+    schemes: schemes(readFileSync(paths.meta, "utf8"), draft.dir),
     links: await links(html, cand.url, cfg.domain, deps.head),
     uniqueness: uniqueness(html, others, cfg.gates.maxShingleShare),
   };

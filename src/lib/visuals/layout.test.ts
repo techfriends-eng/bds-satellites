@@ -53,8 +53,13 @@ test("направление: исключения автора — два ре�
   const wide = "flowchart TB\n  r1 & r2 & r3 --> m1 & m2 & m3\n  m1 & m2 & m3 --> e1 & e2 & e3";
   assert.deepEqual(layout(wide).levels, [3, 3, 3]);
   assert.equal(verticalProblem(wide), null);
-  // Последний ряд из одного блока правило нарушает (kafka_segments_retention, 3/3/1).
-  assert.ok(verticalProblem("flowchart TB\n  a & b & c --> d & e & f\n  d & e & f --> z"));
+  // Узкий итоговый ряд при широкой картинке допустим (kafka 636: 3/3/1, h/w 0.69).
+  const summary = "flowchart TB\n  a & b & c --> d & e & f\n  d & e & f --> z";
+  assert.equal(verticalProblem(summary), null);
+  assert.equal(verticalProblem(summary, 0.69), null);
+  assert.ok(verticalProblem(summary, 1.4), "нарисованная картинка решает");
+  assert.equal(verticalProblem(KRAFT_CHAIN, 0.9), null, "широкая картинка разрешена");
+  assert.ok(verticalProblem("flowchart TB\n  a & b --> c\n  c --> d\n  d --> e"));
 });
 
 test("направление: без направления flowchart и stateDiagram сверху вниз, sequence не проверяется", () => {

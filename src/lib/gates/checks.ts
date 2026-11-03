@@ -1,8 +1,10 @@
 import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { words } from "../dedup/keys.ts";
 import type { SiteConfig } from "../config/site.ts";
 import { parseVisuals } from "../visuals/meta.ts";
-import { verticalProblem } from "../visuals/layout.ts";
+import { jpegRatio, verticalProblem } from "../visuals/layout.ts";
 
 /** Проверки черновика без LLM. Каждая — { ok, detail }; провал любой — статья не готова. */
 export type Check = { ok: boolean; detail: string };
@@ -72,10 +74,14 @@ export function images(files: Map<string, string>, cfg: SiteConfig): Check {
 }
 
 /** Схемы горизонтальные, вертикаль только по исключениям ToDo 103 (visuals/layout.ts). */
-export function schemes(meta: string): Check {
+export function schemes(meta: string, dir?: string): Check {
   const list = parseVisuals(meta).schemes;
+  const ratioOf = (file: string) => {
+    const p = dir && file ? join(dir, file) : "";
+    return p && existsSync(p) ? jpegRatio(readFileSync(p)) : null;
+  };
   const bad = list
-    .map((s) => [s.n, verticalProblem(s.mermaid)] as const)
+    .map((s) => [s.n, verticalProblem(s.mermaid, ratioOf(s.file))] as const)
     .filter(([, p]) => p)
     .map(([n, p]) => `схема ${n}: ${p}`);
   return {

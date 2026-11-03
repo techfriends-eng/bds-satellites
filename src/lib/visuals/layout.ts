@@ -5,6 +5,9 @@
  * широкими рядами дали h/w 0.15–0.69, две вертикальные цепочки TD — 2.23 и 5.30 (ширина 358 и 151 px).
  */
 
+/** Порог по замеру выше: 0.69 у широкой TB, 2.23 у вертикальной цепочки. */
+export const MAX_RATIO = 1;
+
 export type Layout = {
   kind: "flowchart" | "state" | "other";
   vertical: boolean;
@@ -82,11 +85,17 @@ export function layout(mermaid: string): Layout {
 }
 
 /** null — схема в порядке, иначе что не так и как исправить. */
-export function verticalProblem(mermaid: string): string | null {
+export function verticalProblem(mermaid: string, ratio?: number | null): string | null {
   const l = layout(mermaid);
   if (!l.vertical) return null;
   if (l.subgraphs >= 2) return null;
   if (l.levels.length > 0 && l.levels.every((n) => n >= 3)) return null;
+  // Широкая картинка допустима и при узком ряде (решение автора 2026-11-03, kafka 636: ряды 3/3/1,
+  // h/w 0.69). Нарисованная схема — по её пропорции, ещё не нарисованная — рядов не больше, чем блоков
+  // в самом широком ряду (по замеру: 3/3 → 0.69, 6/1 → 5.30, 9/2 → 2.23).
+  if (ratio != null) {
+    if (ratio <= MAX_RATIO) return null;
+  } else if (l.levels.length > 0 && l.levels.length <= Math.max(...l.levels)) return null;
   return `вертикальная схема, уровней ${l.levels.length}, блоков по уровням ${l.levels.join("/")}; нужна flowchart LR, длинную цепочку раздели на две схемы`;
 }
 
@@ -108,6 +117,3 @@ export function jpegRatio(bytes: Uint8Array): number | null {
   }
   return null;
 }
-
-/** Порог по замеру выше: 0.69 у широкой TB, 2.23 у вертикальной цепочки. */
-export const MAX_RATIO = 1;
