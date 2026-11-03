@@ -108,6 +108,11 @@ export async function reviseOnce(
       1,
     ),
     source: r.source || "(нет)",
+    source_url: (
+      deps.db.prepare("SELECT url FROM candidates WHERE id = ?").get(draft.candidate_id) as {
+        url: string;
+      }
+    ).url,
     docs: r.docs || "(нет)",
     article: html,
     meta_md: meta,
