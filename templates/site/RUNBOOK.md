@@ -53,8 +53,12 @@ ssh progon 'sudo -u bds-sat-__SITE__ -H bash -lc "cd /opt/bds-sat-__SITE__ && no
 
 ## 7. Мониторинг и алерты
 
-- `OnFailure=alert@%n.service` — упал сам прогон, тревога в LOGS (toolkit monitoring на progon).
-- Сторож на auto08 `checks.d/bds-satellites.sh`: `sat_run:__SITE__` — нет прогона без ошибки 8/14 суток;
+- Тревоги шлёт auto08, а не progon: у progon нет токена бота и он включается по требованию.
+  `OnFailure=alert@%n.service` в юните оставлен по handbook R1, но `alert@.service` на progon не ставится.
+- Сторож на auto08 `checks.d/bds-satellites.sh` (toolkit `check.sh`, раз в 15 минут, тема 620):
+  `sat_last:__SITE__` — последний прогон закончился с ошибкой, сразу;
+  `sat_run:__SITE__` — нет прогона без ошибки 180/348 ч (пропущен один или два недельных прогона;
+  упавший целиком прогон строки в `sat.runs` не оставляет и виден только так);
   `sat_stuck` — черновики без прохода проверок дольше 14 суток.
 - BDS Хаб, раздел «Спутники»: статьи, статусы, расход, ошибки за 7 дней.
 
