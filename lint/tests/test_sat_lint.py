@@ -1,4 +1,5 @@
 """Эталоны линтера профиля sat (handbook standards/06: линтер-тест с эталонными входами и выходами)."""
+import re
 import json
 import subprocess
 import sys
@@ -39,6 +40,8 @@ flowchart LR
 ## SEO
 
 - **Title:** Потеря кворума KRaft на практике
+- **Description:** Как восстановить кластер Kafka после потери кворума контроллеров KRaft.
+- **Keywords:** KRaft, Apache Kafka, кворум контроллеров
 """
 
 
@@ -125,6 +128,13 @@ class SatLint(unittest.TestCase):
     def test_seo_title_is_checked(self) -> None:
         meta = META.replace("Потеря кворума KRaft на практике", "KRaft: потеря кворума")
         self.assertIn("SEO Title без двоеточия и тире", run(good_html(), meta)["failed_items"])
+
+    def test_seo_description_and_keywords_are_checked(self) -> None:
+        self.assertNotIn("SEO Description до 160 символов", run(good_html())["failed_items"])
+        long = re.sub(r"(\*\*Description:\*\*).*", lambda m: m.group(1) + " " + "д" * 161, META)
+        self.assertIn("SEO Description до 160 символов", run(good_html(), long)["failed_items"])
+        no_keys = re.sub(r"- \*\*Keywords:\*\*.*\n", "", META)
+        self.assertIn("SEO Keywords в метаданных", run(good_html(), no_keys)["failed_items"])
 
     def test_disguised_dashes_fail(self) -> None:
         for dash in ("&mdash;", "&#8212;", " – "):

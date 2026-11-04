@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+## [0.1.22] — 2026-11-04
+
+### Добавлено
+- SEO и метки в WordPress (ToDo 99). Публикация разбирает «## SEO» метаданных: метки WP из Keywords
+  (`publish.tags`, по умолчанию да), поля Yoast title, metadesc, focuskw и primary_category как у блога
+  (`publish.seoMeta`, по умолчанию нет). Перед записью Yoast схема REST сайта сверяется с ключами: без
+  mu-плагина публикация останавливается с ошибкой, а не пишет мимо. mu-плагин `wp/mu-plugins/bds-rest-seo-meta.php`
+  с теми же 8 ключами, что у bigdataschool.ru.
+- `sat_lint`: SEO Description до 160 символов и непустые Keywords.
+
+### Изменено
+- toolkit v0.7.0: `ensureTags`, `tags`, `restMetaKeys`.
+
 ## [0.1.21] — 2026-11-03
 
 ### Исправлено

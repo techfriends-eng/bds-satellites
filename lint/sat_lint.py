@@ -78,6 +78,7 @@ PROFILES = {
         "require_blog_link": False,
         "ban_preparation": True,
         "strict_title": True,      # заголовок поста и SEO Title без двоеточия и тире
+        "seo_fields": True,        # Description и Keywords: Yoast и метки WP
         "strict_dash": True,       # тире в виде сущности и короткое тире с пробелами тоже тире
     },
 }
@@ -404,6 +405,18 @@ def check_lead_and_seo(html: str, meta: str, report: Report) -> None:
                      f"{len(value)} символов при потолке {cap}: {value!r}")
         if PROFILE.get("strict_title"):
             report.check(not TITLE_BAN.search(value), "SEO Title без двоеточия и тире", "да", repr(value))
+
+    # Description и Keywords уходят в Yoast и метки WP (src/lib/publish/wp.ts, ToDo 99).
+    if PROFILE.get("seo_fields"):
+        desc = re.search(r"^-\s*\*\*Description:\*\*\s*(.+)$", meta, flags=re.M)
+        value = desc.group(1).strip() if desc else ""
+        report.check(0 < len(value) <= 160, "SEO Description до 160 символов",
+                     f"{len(value)} символов",
+                     f"{len(value)} символов: {value!r}" if value else "строки нет в метаданных")
+        keys = re.search(r"^-\s*\*\*Keywords:\*\*\s*(.+)$", meta, flags=re.M)
+        words = [k.strip() for k in keys.group(1).split(",") if k.strip()] if keys else []
+        report.check(bool(words), "SEO Keywords в метаданных", f"{len(words)} ключей",
+                     "строки нет или она пустая")
 
     if PROFILE["meta_status"]:
         status = re.search(r"^-\s*\*\*Статус:\*\*\s*(.+)$", meta, flags=re.M)

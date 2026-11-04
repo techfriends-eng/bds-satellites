@@ -40,6 +40,47 @@ export function titleOf(meta: string, fallback: string): string {
   return meta.match(/\*\*Заголовок статьи:\*\*\s*(.+)/)?.[1].trim() ?? fallback;
 }
 
+/** Блок «## SEO» метаданных (sat-delta). Ключевые слова — через запятую, главный ключ первым. */
+export function seoOf(meta: string): { title: string; description: string; keywords: string[] } {
+  const block = meta.split(/^## SEO\s*$/m)[1]?.split(/^## /m)[0] ?? "";
+  const field = (name: string) =>
+    block.match(new RegExp(`^\\s*-\\s*\\*\\*${name}:\\*\\*\\s*(.+)$`, "m"))?.[1].trim() ?? "";
+  return {
+    title: field("Title"),
+    description: field("Description"),
+    keywords: field("Keywords")
+      .split(",")
+      .map((k) => k.trim())
+      .filter(Boolean),
+  };
+}
+
+/** Ключи Yoast, которые пишет публикация. Тот же набор, что у блога (wiki_visualizer wordpress.sh). */
+export const YOAST_KEYS = [
+  "_yoast_wpseo_title",
+  "_yoast_wpseo_metadesc",
+  "_yoast_wpseo_focuskw",
+  "_yoast_wpseo_primary_category",
+] as const;
+
+export function yoastMeta(
+  seo: ReturnType<typeof seoOf>,
+  categories: number[],
+): Record<string, string> {
+  const meta: Record<string, string> = {};
+  if (seo.title) meta._yoast_wpseo_title = seo.title;
+  if (seo.description) meta._yoast_wpseo_metadesc = seo.description;
+  if (seo.keywords[0]) meta._yoast_wpseo_focuskw = seo.keywords[0];
+  if (categories[0]) meta._yoast_wpseo_primary_category = String(categories[0]);
+  return meta;
+}
+
+function withoutPrimary(meta?: Record<string, string>): Record<string, string> | undefined {
+  if (!meta) return meta;
+  const { _yoast_wpseo_primary_category: _, ...rest } = meta;
+  return rest;
+}
+
 export type Published = { id: number; link: string; status: string };
 
 export async function publishDraft(
@@ -87,10 +128,32 @@ export async function publishDraft(
   }
   const content = gateNote(report) + withUtm(html, cfg.domain, slug);
   const title = titleOf(meta, slug);
+  const seo = seoOf(meta);
+  // Без mu-плагина WordPress молча выбрасывает поля Yoast: проверяем схему REST до записи (ToDo 99).
+  let seoMeta: Record<string, string> | undefined;
+  if (cfg.publish.seoMeta) {
+    const keys = new Set(await wp.restMetaKeys());
+    const missing = YOAST_KEYS.filter((k) => !keys.has(k));
+    if (missing.length)
+      throw new Error(
+        `publish.seoMeta включён, но REST сайта не принимает ${missing.join(", ")}: нет mu-плагина bds-rest-seo-meta (RUNBOOK §6)`,
+      );
+    seoMeta = yoastMeta(seo, cfg.publish.categories);
+  }
+  const tags =
+    cfg.publish.tags && seo.keywords.length ? await wp.ensureTags(seo.keywords, creds) : undefined;
   const entry = draft.wp_post_id
     ? await wp.updateEntry(
         draft.wp_post_id,
-        { title, contentHtml: content, featuredMedia: featured },
+        // Главная рубрика выбирается только из categories записи, а их обновление не шлёт: без пары
+        // Yoast её молча игнорирует (wp/mu-plugins/bds-rest-seo-meta.php). Ставится при создании.
+        {
+          title,
+          contentHtml: content,
+          featuredMedia: featured,
+          tags,
+          meta: withoutPrimary(seoMeta),
+        },
         creds,
       )
     : await wp.createEntry(
@@ -99,8 +162,10 @@ export async function publishDraft(
           slug,
           contentHtml: content,
           categories: cfg.publish.categories,
+          tags,
           featuredMedia: featured,
           status: cfg.publish.status,
+          meta: seoMeta,
         },
         creds,
       );
