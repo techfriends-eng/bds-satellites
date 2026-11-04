@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.1.22] — 2026-11-04
+
 ### Добавлено
 - SEO и метки в WordPress (ToDo 99). Публикация разбирает «## SEO» метаданных: метки WP из Keywords
   (`publish.tags`, по умолчанию да), поля Yoast title, metadesc, focuskw и primary_category как у блога
