@@ -12,6 +12,11 @@ export type Source = { id: string; kind: SourceKind; title: string; url: string;
 export type Course = { title: string; path: string };
 /** Раздел официальной документации: версия задана адресом, pages — проверенные пути от base. */
 export type DocSource = { title: string; base: string; pages: string[] };
+export type DocsIndex = {
+  products: { product: string; version: string }[];
+  k: number;
+  maxChars: number;
+};
 
 export type SiteConfig = {
   siteId: string;
@@ -21,6 +26,8 @@ export type SiteConfig = {
   courses: Course[];
   sources: Source[];
   docs: DocSource[];
+  /** Индекс bds-docs-index (ADR 0002): продукты и версии стенда; null — не используется. */
+  docsIndex: DocsIndex | null;
   collect: { timeoutMs: number; simhashMaxDistance: number; simhashMinWords: number };
   select: {
     maxAgeDays: number;
@@ -78,6 +85,20 @@ function parseDocs(raw: Raw): DocSource[] {
   });
 }
 
+function parseDocsIndex(raw: Raw): DocsIndex | null {
+  const d = raw.docs_index as
+    | { products?: { product?: unknown; version?: unknown }[]; k?: number; max_chars?: number }
+    | undefined;
+  if (!d) return null;
+  const products = (d.products ?? []).map((p, i) => {
+    if (!p.product || !p.version)
+      throw new Error(`docs_index.products[${i}]: нужны product и version`);
+    return { product: String(p.product), version: String(p.version) };
+  });
+  if (!products.length) throw new Error("docs_index.products пуст");
+  return { products, k: Number(d.k ?? 4), maxChars: Number(d.max_chars ?? 12_000) };
+}
+
 export function parseSiteConfig(text: string): SiteConfig {
   const raw = (parse(text) ?? {}) as Raw;
   if (!raw.site?.id || !raw.site.domain) throw new Error("site.id и site.domain обязательны");
@@ -128,6 +149,7 @@ export function parseSiteConfig(text: string): SiteConfig {
     courses: (raw.courses as Course[] | undefined) ?? [],
     sources,
     docs: parseDocs(raw),
+    docsIndex: parseDocsIndex(raw),
     collect: section(raw, "collect", {
       timeoutMs: 20_000,
       simhashMaxDistance: 6,

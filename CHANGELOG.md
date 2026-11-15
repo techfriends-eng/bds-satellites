@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+## [0.1.26] — 2026-11-16
+
+### Добавлено
+- Индекс документации версий стенда (ADR 0002, bds-docs-index v0.2.0). После плана конвейер задаёт запросы по
+  ключу, разделам и сравнению плана в `docs.search` по продуктам и версиям из `docs_index` в `site.yaml`; фрагменты
+  с разделом и ссылкой дописываются в `research.docs` — их видят write, review и revise. Без `DOCS_DB_URL` /
+  `DOCS_OLLAMA_URL` или при недоступном supan8n шаг пропускается со строкой `docs-index` в `fetchLog`.
+- `src/lib/docs/search.ts` — форк правила запроса `bds-docs-index` `src/lib/query.ts` (инструкция Qwen3-Embedding),
+  под сторожем дрейфа bds-content.
+
 ## [0.1.25] — 2026-11-15
 
 ### Добавлено
