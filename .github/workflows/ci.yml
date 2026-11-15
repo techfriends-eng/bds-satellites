@@ -16,6 +16,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Пин toolkit отстаёт от последнего тега не больше чем на 2 версии (bds-content ADR 0001, п. 7).
+      - run: bash node_modules/@techfriends-eng/toolkit/ops/pin_lag.sh
       - run: npm run test:unit
       - run: npm run test:lint
       - run: npm run typecheck
