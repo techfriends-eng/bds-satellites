@@ -69,12 +69,19 @@ export function renderScheme(
     const lrMmd = `${file}.lr.mmd`;
     const lrPng = `${file}.lr.png`;
     writeFileSync(join(dir, lrMmd), `${brandMermaid(lr, theme.brand)}\n`);
-    const taller = (p: string) => `[ "$(identify -format '%h' ${p})" -gt "$(identify -format '%w' ${p})" ]`;
+    const taller = (p: string) =>
+      `[ "$(identify -format '%h' ${p})" -gt "$(identify -format '%w' ${p})" ]`;
     retry =
       ` && if ${taller(png)}; then ${mmdc(lrMmd, lrPng)} && if ! ${taller(lrPng)}; then mv ${lrPng} ${png}; fi; fi` +
       ` && rm -f ${lrMmd} ${lrPng}`;
   }
-  run(docker, image, dir, uid, `${mmdc(mmd, png)}${retry} && rm -f ${mmd} ${conf} && ${finalize(png, file, bg)}`);
+  run(
+    docker,
+    image,
+    dir,
+    uid,
+    `${mmdc(mmd, png)}${retry} && rm -f ${mmd} ${conf} && ${finalize(png, file, bg)}`,
+  );
 }
 
 /**

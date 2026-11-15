@@ -271,8 +271,11 @@ test("сброс схем: файлы и записи схем уходят, п�
 test("R5: forceLR меняет только направление сверху вниз", async () => {
   const { forceLR } = await import("./render.ts");
   assert.equal(forceLR("flowchart TD\n  a-->b"), "flowchart LR\n  a-->b");
-  assert.equal(forceLR("graph BT\n  subgraph X\n    direction TB\n  end"), "graph LR\n  subgraph X\n    direction LR\n  end");
-  assert.equal(forceLR("flowchart LR\n  a[\"TD\"]-->b"), "flowchart LR\n  a[\"TD\"]-->b");
+  assert.equal(
+    forceLR("graph BT\n  subgraph X\n    direction TB\n  end"),
+    "graph LR\n  subgraph X\n    direction LR\n  end",
+  );
+  assert.equal(forceLR('flowchart LR\n  a["TD"]-->b'), 'flowchart LR\n  a["TD"]-->b');
   assert.equal(forceLR("sequenceDiagram\n  a->>b: x"), "sequenceDiagram\n  a->>b: x");
 });
 
