@@ -27,6 +27,10 @@ check "toolkit той версии, что требует пакет" node -e '
   const near = pkg + "/node_modules/@techfriends-eng/toolkit/package.json";
   const got = read(existsSync(near) ? near : pkg + "/../@techfriends-eng/toolkit/package.json").version;
   process.exit(got === want ? 0 : 1);' "$PKG"
+# Пин toolkit отстаёт от последнего тега не больше чем на 2 версии (bds-content ADR 0001, п. 7).
+TK="$PKG/node_modules/@techfriends-eng/toolkit"
+[ -d "$TK" ] || TK="$PKG/../@techfriends-eng/toolkit"
+check "пин toolkit отстаёт не больше чем на 2 версии" bash "$TK/ops/pin_lag.sh" "$PKG/package.json"
 check "docker доступен" docker info
 check "образ bds-sat-visuals:$(cat "$PKG/VERSION")" docker image inspect "bds-sat-visuals:$(cat "$PKG/VERSION")"
 for v in SAT_SITE_DIR SAT_STATE_DIR OPENROUTER_API_KEY WP_URL WP_USER WP_APP_PASSWORD SAT_DB_URL; do
