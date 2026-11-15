@@ -12,6 +12,40 @@
 - Обязательного раздела разбора исходника больше нет (задача 105): задача своими словами, каждая деталь
   исходника объяснена или не упоминается. `review` п. 6 даёт high за частности исходника без объяснения.
 
+## [0.1.24] — 2026-11-15
+
+### Исправлено
+- `ops/build-visuals.sh` после сборки удаляет старые теги `bds-sat-visuals`. Каждый деплой давал новый тег
+  (~0.6 ГБ уникально), к 2026-11-14 на progon их было девять, диск 100%. Теги версий, на которых стоят сайты
+  (`/opt/bds-sat-*/node_modules/bds-satellites/VERSION`), остаются; если хоть один файл не читается, чистка
+  пропускается. Затем `docker image prune -f` (только висячие слои).
+
+## [0.1.23] — 2026-11-15
+
+### Изменено
+- Общие правила bds-content content-rules v0.2.1 (ADR 0001 bds-content), «Делаем унификацию» автора:
+  - R1: в SEO Title и Description нет «:»; R2/R3: главные термины (2–4 из заголовка плюс автор исходника)
+    в лиде `<strong>` один раз, строка «Главные термины» в метаданных (`sat-delta.md`);
+  - R5: Mermaid только слева направо — `sat_lint.py` валит TB/TD/BT, рендер перерисовывает вертикальный
+    PNG с `LR` (`forceLR`, копия `mermaid_force_lr` wiki_visualizer).
+- `style/upstream` — новая копия правил bds-article 1.0.8 (`bds-prompts@f5e69f8`): article-plan, article-write,
+  article-ship. `lint/sat_lint.py` синхронизирован с `wiki_lint.py@dde5b9b` (перенесены R1, R2, R5; правки
+  только для wiki не нужны). Шапки `visuals/` сверены с `wiki_visualizer@5658090` (`postgresql-client` спутникам
+  не нужен). Сторож дрейфа bds-content: дрейфа нет.
+
+## [0.1.22] — 2026-11-04
+
+### Добавлено
+- SEO и метки в WordPress (ToDo 99). Публикация разбирает «## SEO» метаданных: метки WP из Keywords
+  (`publish.tags`, по умолчанию да), поля Yoast title, metadesc, focuskw и primary_category как у блога
+  (`publish.seoMeta`, по умолчанию нет). Перед записью Yoast схема REST сайта сверяется с ключами: без
+  mu-плагина публикация останавливается с ошибкой, а не пишет мимо. mu-плагин `wp/mu-plugins/bds-rest-seo-meta.php`
+  с теми же 8 ключами, что у bigdataschool.ru.
+- `sat_lint`: SEO Description до 160 символов и непустые Keywords.
+
+### Изменено
+- toolkit v0.7.0: `ensureTags`, `tags`, `restMetaKeys`.
+
 ## [0.1.21] — 2026-11-03
 
 ### Исправлено

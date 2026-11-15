@@ -7,7 +7,7 @@ import type { WpClient } from "@techfriends-eng/toolkit/wp";
 import { parseSiteConfig } from "../config/site.ts";
 import { articleRow, createJournal } from "../journal/journal.ts";
 import { openState } from "../store/db.ts";
-import { gateNote, publishDraft, withUtm } from "./wp.ts";
+import { gateNote, publishDraft, seoOf, withUtm, yoastMeta } from "./wp.ts";
 
 const cfg = parseSiteConfig(
   "site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}\nselect: {keywords: [kafka]}\npublish: {categories: [127]}\n",
@@ -148,4 +148,68 @@ test("журнал: статьи и прогон одной серией зап�
   await j.close(async () => {
     throw new Error("ECONNREFUSED");
   }, 0);
+});
+
+const SEO_META =
+  "- **Заголовок статьи:** Кворум KRaft\n\n## SEO\n\n- **Title:** Кворум KRaft без паники\n- **Description:** Что делать при потере кворума.\n- **Keywords:** KRaft, Apache Kafka, кворум\n";
+
+test("SEO: блок разбирается, поля Yoast как у блога", () => {
+  const seo = seoOf(SEO_META);
+  assert.deepEqual(seo, {
+    title: "Кворум KRaft без паники",
+    description: "Что делать при потере кворума.",
+    keywords: ["KRaft", "Apache Kafka", "кворум"],
+  });
+  assert.deepEqual(yoastMeta(seo, [127]), {
+    _yoast_wpseo_title: "Кворум KRaft без паники",
+    _yoast_wpseo_metadesc: "Что делать при потере кворума.",
+    _yoast_wpseo_focuskw: "KRaft",
+    _yoast_wpseo_primary_category: "127",
+  });
+  assert.deepEqual(seoOf("- **Заголовок статьи:** X\n").keywords, []);
+});
+
+test("публикация: метки из Keywords; seoMeta без mu-плагина — ошибка до записи, с ним — поля Yoast", async () => {
+  const { db, dir } = setup();
+  writeFileSync(join(dir, "s1_meta.md"), SEO_META);
+  const seen: { tags?: number[]; meta?: Record<string, string> }[] = [];
+  let metaKeys = ["footnotes"];
+  const wp = {
+    uploadMedia: async () => ({ id: 1, sourceUrl: "u" }),
+    ensureTags: async (names: string[]) => names.map((_, i) => 40 + i),
+    restMetaKeys: async () => metaKeys,
+    createEntry: async (i: { tags?: number[]; meta?: Record<string, string> }) => {
+      seen.push(i);
+      return { id: 9300, link: "L", slug: "s1", status: "draft" };
+    },
+    updateEntry: async (id: number, i: { tags?: number[]; meta?: Record<string, string> }) => {
+      seen.push(i);
+      return { id, link: "L", slug: "s1", status: "draft" };
+    },
+  } as unknown as WpClient;
+  const creds = { username: "u", appPassword: "p" };
+  const draft = () => db.prepare("SELECT * FROM drafts WHERE id = 1").get() as never;
+  await publishDraft({ db, cfg, wp, creds, styleFailures: () => [] }, draft(), "s1");
+  assert.deepEqual(seen[0].tags, [40, 41, 42]);
+  assert.equal(seen[0].meta, undefined);
+
+  const on = { ...cfg, publish: { ...cfg.publish, seoMeta: true } };
+  await assert.rejects(
+    publishDraft({ db, cfg: on, wp, creds, styleFailures: () => [] }, draft(), "s1"),
+    /нет mu-плагина bds-rest-seo-meta/,
+  );
+  assert.equal(seen.length, 1, "без плагина запись не обновлялась");
+  metaKeys = [
+    "_yoast_wpseo_title",
+    "_yoast_wpseo_metadesc",
+    "_yoast_wpseo_focuskw",
+    "_yoast_wpseo_primary_category",
+  ];
+  await publishDraft({ db, cfg: on, wp, creds, styleFailures: () => [] }, draft(), "s1");
+  assert.equal(seen[1].meta?._yoast_wpseo_focuskw, "KRaft");
+  assert.equal(
+    "_yoast_wpseo_primary_category" in (seen[1].meta ?? {}),
+    false,
+    "обновление без categories",
+  );
 });

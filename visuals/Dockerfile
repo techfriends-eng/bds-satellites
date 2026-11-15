@@ -1,4 +1,5 @@
-# Форк techfriends-eng/bds-wiki-visualizer@2dd520b (Dockerfile): mermaid-cli в headless Chromium.
+# Форк techfriends-eng/bds-wiki-visualizer@5658090 (Dockerfile): mermaid-cli в headless Chromium.
+# Сверено 2026-11-15: postgresql-client источника (журнал wiki) спутникам не нужен.
 # Добавлено для спутников: exiftool — чистка метаданных картинок (EXIF/XMP/C2PA) вместо сервиса
 # watermarks-remover на auto08 (ADR 0001: без нового сетевого пути progon → auto08).
 # Тег образа — версия bds-satellites: ops/build-visuals.sh собирает bds-sat-visuals:$(cat VERSION).

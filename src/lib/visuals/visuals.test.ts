@@ -267,3 +267,30 @@ test("сброс схем: файлы и записи схем уходят, п�
     ["a_preview.jpg"],
   );
 });
+
+test("R5: forceLR меняет только направление сверху вниз", async () => {
+  const { forceLR } = await import("./render.ts");
+  assert.equal(forceLR("flowchart TD\n  a-->b"), "flowchart LR\n  a-->b");
+  assert.equal(
+    forceLR("graph BT\n  subgraph X\n    direction TB\n  end"),
+    "graph LR\n  subgraph X\n    direction LR\n  end",
+  );
+  assert.equal(forceLR('flowchart LR\n  a["TD"]-->b'), 'flowchart LR\n  a["TD"]-->b');
+  assert.equal(forceLR("sequenceDiagram\n  a->>b: x"), "sequenceDiagram\n  a->>b: x");
+});
+
+test("R5: вертикальная схема — в команде проверка высоты и перерисовка LR; горизонтальная — без неё", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vis-"));
+  const calls: string[][] = [];
+  const docker: Docker = (args) => {
+    calls.push(args);
+    return { rc: 0, out: "" };
+  };
+  renderScheme(docker, "img", dir, "1:1", "v.jpg", "flowchart TD\n a-->b", THEME);
+  const cmd = calls[0].at(-1) ?? "";
+  assert.match(cmd, /identify -format '%h' v\.jpg\.png/);
+  assert.match(cmd, /mmdc -i v\.jpg\.lr\.mmd -o v\.jpg\.lr\.png/);
+  assert.match(readFileSync(join(dir, "v.jpg.lr.mmd"), "utf8"), /^flowchart LR/);
+  renderScheme(docker, "img", dir, "1:1", "h.jpg", "flowchart LR\n a-->b", THEME);
+  assert.doesNotMatch(calls[1].at(-1) ?? "", /identify/);
+});
