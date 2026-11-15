@@ -6,7 +6,7 @@ import { parseJson } from "../llm/client.ts";
 import { render } from "../prompts/render.ts";
 import type { Style } from "../style/rules.ts";
 import { checkDraft, type StandDeps } from "../stand/check.ts";
-import { images, links, lint, uniqueness, type Check, type Head } from "./checks.ts";
+import { images, links, lint, sourceUse, uniqueness, type Check, type Head } from "./checks.ts";
 
 /**
  * Проверки и переписывание. Линтер оформления, образы, ссылки, уникальность, смысловая проверка
@@ -19,7 +19,11 @@ export type GatesReport = { ok: boolean; checks: Record<string, Check>; review: 
 export type GateDeps = StandDeps & { style: Style; lintPy: string; head: Head };
 type Draft = { candidate_id: number; dir: string };
 
-function research(dir: string): { source: string; docs: string; plan: { key?: string } } {
+function research(dir: string): {
+  source: string;
+  docs: string;
+  plan: { key?: string; source_use?: unknown };
+} {
   const p = join(dir, ".work", "research.json");
   return existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : { source: "", docs: "", plan: {} };
 }
@@ -66,7 +70,11 @@ export async function gate(deps: GateDeps, draft: Draft, slug: string): Promise<
       detail: html.includes("[[output") ? "остались места вывода без вывода" : "вывод вставлен",
     },
     images: images(parseArticle(html).files, cfg),
-    links: await links(html, cand.url, cfg.domain, deps.head),
+    links: await links(html, cand.url, cfg.domain, deps.head, {
+      use: sourceUse(r.plan),
+      text: r.source,
+      known: r.docs,
+    }),
     uniqueness: uniqueness(html, others, cfg.gates.maxShingleShare),
   };
   const issues = await review(deps, html, r.docs, draft.candidate_id);
@@ -142,6 +150,7 @@ export async function reviseOnce(
         url: string;
       }
     ).url,
+    source_use: sourceUse(r.plan),
     docs: r.docs || "(нет)",
     article: html,
     meta_md: meta,
