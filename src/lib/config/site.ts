@@ -43,7 +43,12 @@ export type SiteConfig = {
     maxRevisions: number;
     maxRevisionsTotal: number;
   };
-  publish: { status: "draft"; categories: number[] };
+  /**
+   * tags — метки WP из Keywords метаданных. seoMeta — поля Yoast через REST: включать только после
+   * установки mu-плагина wp/mu-plugins/bds-rest-seo-meta.php (RUNBOOK сайта), иначе публикация
+   * остановится с ошибкой, а не запишет SEO мимо.
+   */
+  publish: { status: "draft"; categories: number[]; tags: boolean; seoMeta: boolean };
   schedule: { day: string };
   bdsBase: string;
 };
@@ -104,7 +109,12 @@ export function parseSiteConfig(text: string): SiteConfig {
   });
   // Пустой список ключей пропустил бы весь пул: это ошибка конфига, а не «без фильтра».
   if (select.keywords.length === 0) throw new Error("select.keywords пуст");
-  const publish = section(raw, "publish", { status: "draft" as const, categories: [] as number[] });
+  const publish = section(raw, "publish", {
+    status: "draft" as const,
+    categories: [] as number[],
+    tags: true,
+    seoMeta: false,
+  });
   if (publish.status !== "draft") {
     throw new Error(
       "publish.status: пока только draft — автопубликация отдельным решением после пилота",

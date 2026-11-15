@@ -1,4 +1,4 @@
-<!-- Форк: techfriends-eng/bds-prompts@607bc5c, system-prompts/plugins/bds-article/skills/article-plan/rules.md.
+<!-- Форк: techfriends-eng/bds-prompts@f5e69f8, system-prompts/plugins/bds-article/skills/article-plan/rules.md.
      Не правится здесь: отличия спутников — style/sat-delta.md. Обновление — новая копия с новым коммитом. -->
 
 # Стадия 1. Новость, разведка и план статьи блога
@@ -35,7 +35,7 @@ for brief in sorted(pathlib.Path(".").glob("*_brief.md")):
     slug = brief.name[:-len("_brief.md")]
     meta = pathlib.Path(f"{slug}_meta.md")
     text = meta.read_text(encoding="utf-8") if meta.exists() else ""
-    if re.search(r"^- \*\*Статус:\*\* сдано", text, re.M):
+    if re.search(r"^- \*\*Статус:\*\* (ready|сдано)", text, re.M):
         if re.search(rf"^- \*\*Дата сдачи:\*\* {month}", text, re.M):
             shipped.append(slug)
     elif "[x] план" in brief.read_text(encoding="utf-8"):
@@ -78,7 +78,9 @@ Habr, и работай от него. Habr идёт в референсы ка�
 - Выведи главный ключ темы, английский оригинал по K2a ядра.
 - Из ключа получи файловый slug и URL-slug по K2.
 - Собери canonical URL по K5.
-- SEO Title подбирается здесь же, до 60 символов, с главным ключом. Шаблон «Что такое X» для
+- SEO Title подбирается здесь же, до 60 символов, с главным ключом и без «:» (bds-content
+  content-rules R1). Главные термины (R3) тоже фиксируются здесь: 2-4 из заголовка плюс вендор
+  новости, они уходят в бриф. Шаблон «Что такое X» для
   блога не годится. Блог отвечает на вопросы «как», «зачем», «что выбрать», и формулировка берётся
   по частотности. Wordstat и Google Trends используются, если отдались. Недоступное фиксируется
   строкой «не проверено». Потолок здесь два обращения к вебу, отдельно от разведки.
