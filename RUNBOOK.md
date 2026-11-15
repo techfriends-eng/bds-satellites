@@ -44,7 +44,9 @@ flowchart LR
 
 Список — `templates/site/deploy/bds-sat-__SITE__.env.example`: ключ OpenRouter сайта, WP-логин и
 Application Password, `SAT_DB_URL` (sat_writer), `STACKRADAR_RO_URL` (sat_reader). Роли и сеть на auto08 —
-RUNBOOK stack-radar §5.
+RUNBOOK stack-radar §5. `DOCS_DB_URL` (docs_reader через пулер supan8n) и `DOCS_OLLAMA_URL` — индекс документации
+bds-docs-index по Tailscale; секция `docs_index` в `site.yaml` перечисляет продукты и версии стенда. Нет переменных или
+supan8n недоступен — план и статья идут без фрагментов индекса, в `fetchLog` строка `docs-index`.
 
 ## 5. Данные и БД
 

@@ -52,3 +52,19 @@ test("документация: разделы из конфига, base обя�
   ]);
   assert.throws(() => parseSiteConfig(`${YAML}${d.replace("43/'", "43'")}`), /docs/);
 });
+
+test("docs_index: продукты и версии, значения по умолчанию, без секции — null", () => {
+  assert.equal(parseSiteConfig(YAML).docsIndex, null);
+  const cfg = parseSiteConfig(
+    `${YAML}\ndocs_index:\n  products:\n    - { product: kafka, version: 4.3.2 }\n`,
+  );
+  assert.deepEqual(cfg.docsIndex, {
+    products: [{ product: "kafka", version: "4.3.2" }],
+    k: 4,
+    maxChars: 12000,
+  });
+  assert.throws(
+    () => parseSiteConfig(`${YAML}\ndocs_index:\n  products: []\n`),
+    /docs_index.products пуст/,
+  );
+});

@@ -4,6 +4,7 @@ import { splitAnswer } from "../article/html.ts";
 import type { SiteConfig } from "../config/site.ts";
 import { parseJson, Truncated, type Llm } from "../llm/client.ts";
 import { render } from "../prompts/render.ts";
+import { docsForPlan } from "../docs/search.ts";
 import { createFetcher, docUrlAllowed, formatLog, type GetHtml } from "../research/fetcher.ts";
 import { manualPath, MIN_SOURCE_WORDS, readSource, wordCount } from "../research/source.ts";
 import { nowIso, type Db } from "../store/db.ts";
@@ -143,6 +144,11 @@ export async function writeDraft(deps: DraftDeps, row: Candidate): Promise<strin
       const text = await fetcher.text(url, DOC_LIMIT);
       if (text) docs.push(`### ${url}\n${text}`);
     }
+    // Индекс документации версий стенда (ADR 0002): дополняет страницы из doc_urls, не заменяет.
+    const indexed = await docsForPlan(plan, cfg.docsIndex, (result) =>
+      fetcher.log.push({ url: "docs-index", result }),
+    );
+    if (indexed) docs.push(indexed);
     research = { source, docs: docs.join("\n\n"), fetchLog: formatLog(fetcher.log), plan };
     mkdirSync(join(deps.draftsDir, ".plans"), { recursive: true });
     writeFileSync(cachePath, JSON.stringify(research));
