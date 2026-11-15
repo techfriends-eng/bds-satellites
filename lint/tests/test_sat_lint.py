@@ -18,6 +18,7 @@ META = f"""# Метаданные статьи Потеря кворума KRaft
 
 - **Термин:** KRaft
 - **Заголовок статьи:** Потеря кворума контроллеров KRaft
+- **Главные термины:** KRaft
 - **Slug:** {SLUG}
 
 ## Часть 2. Визуализации
@@ -48,7 +49,7 @@ flowchart LR
 def good_html() -> str:
     body = "\n".join([PARA] * 70)
     return "\n".join([
-        "<p>KRaft хранит метаданные кластера в кворуме контроллеров, и разбор ниже показывает, что ломается без большинства.</p>",
+        "<p><strong>KRaft</strong> хранит метаданные кластера в кворуме контроллеров, и разбор ниже показывает, что ломается без большинства.</p>",
         "&nbsp;",
         "<h2>Что хранится в кворуме</h2>",
         body,
@@ -156,6 +157,26 @@ class SatLint(unittest.TestCase):
         html = good_html().replace(
             "</p>", " Прогон этого не доказал, брокер ответил только на чтение.</p>", 1)
         self.assertEqual(run(html)["failed_items"], [])
+
+
+class ContentRules(unittest.TestCase):
+    """bds-content content-rules R1, R2, R5 (перенесены из wiki_lint.py)."""
+
+    def test_r1_colon_in_description_fails(self) -> None:
+        meta = META.replace("- **Description:** Как восстановить", "- **Description:** Кворум: как восстановить")
+        self.assertIn("R1 без двоеточия в SEO Title и Description", run(good_html(), meta)["failed_items"])
+
+    def test_r2_term_not_bold_fails(self) -> None:
+        html = good_html().replace("<strong>KRaft</strong> хранит", "KRaft хранит")
+        self.assertIn("R2 главные термины в лиде жирным один раз", run(html)["failed_items"])
+
+    def test_r2_no_terms_line_fails(self) -> None:
+        meta = META.replace("- **Главные термины:** KRaft\n", "")
+        self.assertIn("R2 строка «Главные термины» в метаданных", run(good_html(), meta)["failed_items"])
+
+    def test_r5_vertical_mermaid_fails(self) -> None:
+        meta = META.replace("flowchart LR", "flowchart TD")
+        self.assertIn("R5 Mermaid не вертикальный", run(good_html(), meta)["failed_items"])
 
 
 if __name__ == "__main__":

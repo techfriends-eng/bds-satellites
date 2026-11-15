@@ -27,6 +27,21 @@ function finalize(png: string, jpg: string, background: string): string {
   return `convert ${png} -background '${background}' -flatten -resize '${FINAL}>' -quality 95 ${jpg} && exiftool -q -overwrite_original -all= ${jpg} && rm -f ${png}`;
 }
 
+/**
+ * bds-content content-rules R5: направление graph/flowchart и direction в subgraph TB/TD/BT → LR.
+ * Остальной код схемы не меняется. Копия `mermaid_force_lr` из wiki_visualizer (lib/mermaid_render.sh).
+ */
+export function forceLR(mermaid: string): string {
+  return mermaid
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/^(\s*(?:graph|flowchart))\s+(?:TB|TD|BT)\b/, "$1 LR")
+        .replace(/^(\s*direction)\s+(?:TB|TD|BT)\b/, "$1 LR"),
+    )
+    .join("\n");
+}
+
 /** Палитра сайта и база параметров mmdc (visuals/mermaid_theme_override.json). */
 export type SchemeTheme = { brand: Brand; base: Record<string, unknown> };
 
@@ -45,12 +60,27 @@ export function renderScheme(
   writeFileSync(join(dir, conf), JSON.stringify(mermaidConfig(theme.base, theme.brand)));
   const bg = theme.brand.background;
   const png = `${file}.png`;
+  const mmdc = (input: string, output: string) =>
+    `mmdc -i ${input} -o ${output} -b '${bg}' -p /visuals/puppeteer-config.json -c ${conf} -s 3`;
+  // R5: PNG выше, чем шире, — перерисовать с LR и взять, если он не выше, чем шире.
+  const lr = forceLR(mermaid);
+  let retry = "";
+  if (lr !== mermaid) {
+    const lrMmd = `${file}.lr.mmd`;
+    const lrPng = `${file}.lr.png`;
+    writeFileSync(join(dir, lrMmd), `${brandMermaid(lr, theme.brand)}\n`);
+    const taller = (p: string) =>
+      `[ "$(identify -format '%h' ${p})" -gt "$(identify -format '%w' ${p})" ]`;
+    retry =
+      ` && if ${taller(png)}; then ${mmdc(lrMmd, lrPng)} && if ! ${taller(lrPng)}; then mv ${lrPng} ${png}; fi; fi` +
+      ` && rm -f ${lrMmd} ${lrPng}`;
+  }
   run(
     docker,
     image,
     dir,
     uid,
-    `mmdc -i ${mmd} -o ${png} -b '${bg}' -p /visuals/puppeteer-config.json -c ${conf} -s 3 && rm -f ${mmd} ${conf} && ${finalize(png, file, bg)}`,
+    `${mmdc(mmd, png)}${retry} && rm -f ${mmd} ${conf} && ${finalize(png, file, bg)}`,
   );
 }
 

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Форк bds-wiki-articles/wiki_lint.py@744d3bb для статей сайтов-спутников (bds-satellites, ADR 0001).
+"""Форк: techfriends-eng/bds-wiki-articles@dde5b9b, wiki_lint.py
+Для статей сайтов-спутников (bds-satellites, ADR 0001). Синхронизирован 2026-11-15: перенесены
+content-rules R1, R2 (как у блога, по строке «Главные термины») и R5. Изменения только для wiki
+(потолок 2000 слов, &nbsp; и <strong> заголовка Gutenberg, «Статус» в meta) спутникам не нужны.
 
 Отличия от исходника — только профиль sat и аргументы --dir/--domain: каталог черновика и домен
 сайта вместо bigdataschool.ru, баннеры cbanner запрещены (CTA — текстовая ссылка на курс), ссылки на
@@ -418,6 +421,29 @@ def check_lead_and_seo(html: str, meta: str, report: Report) -> None:
         report.check(bool(words), "SEO Keywords в метаданных", f"{len(words)} ключей",
                      "строки нет или она пустая")
 
+    # content-rules R1: в SEO Title и Description нет «:» с пробелом или концом строки после него.
+    desc_r1 = re.search(r"^-\s*\*\*Description:\*\*\s*(.+)$", meta, flags=re.M)
+    seo_fields = [m.group(1).strip() for m in (seo, desc_r1) if m]
+    colon = [f for f in seo_fields if re.search(r":(?=\s|$)", f)]
+    report.check(not colon, "R1 без двоеточия в SEO Title и Description", "нет",
+                 f"двоеточие: {colon[0][:60]!r}" if colon else "")
+
+    # content-rules R2: «Главные термины» из meta выделены в лиде <strong> один раз, другого жирного нет.
+    if not PROFILE["gutenberg_lead"]:
+        terms_line = re.search(r"^-\s*\*\*Главные термины:\*\*\s*(.+)$", meta, flags=re.M)
+        if not terms_line:
+            report.add("FAIL", "R2 строка «Главные термины» в метаданных", "строки нет, лид сверять не с чем")
+        else:
+            terms = [t.strip().strip("`") for t in terms_line.group(1).split(",") if t.strip()]
+            lead = re.search(r"<p>(?!&nbsp;</p>)(.*?)</p>", html, flags=re.S)
+            raw = lead.group(1) if lead else ""
+            strongs = [s.lower() for s in re.findall(r"<strong>(.*?)</strong>", raw)]
+            missing = [t for t in terms if strongs.count(t.lower()) != 1]
+            extra = [s for s in strongs if s not in [t.lower() for t in terms]]
+            report.check(not missing and not extra, "R2 главные термины в лиде жирным один раз",
+                         ", ".join(terms),
+                         f"не выделены или выделены не один раз: {missing}; лишний жирный: {extra}")
+
     if PROFILE["meta_status"]:
         status = re.search(r"^-\s*\*\*Статус:\*\*\s*(.+)$", meta, flags=re.M)
         done = re.search(r"^-\s*\*\*Дата сдачи:\*\*\s*(.+)$", meta, flags=re.M)
@@ -453,6 +479,10 @@ def check_images(html: str, meta: str, report: Report) -> None:
         report.check(schemes == mermaid_blocks and mermaid_blocks > 0, "Код Mermaid у каждой схемы",
                      f"{schemes} схем, {mermaid_blocks} блоков Mermaid",
                      f"{schemes} схем против {mermaid_blocks} блоков Mermaid")
+        # content-rules R5: схема читается слева направо, TB/TD/BT — провал.
+        vertical = re.findall(r"^\s*(?:graph|flowchart|direction)\s+(TB|TD|BT)\b", meta, flags=re.M)
+        report.check(not vertical, "R5 Mermaid не вертикальный", "LR/RL",
+                     f"направлений сверху вниз: {len(vertical)}, нужно LR")
 
 
 def check_code_blocks(html: str, report: Report) -> None:

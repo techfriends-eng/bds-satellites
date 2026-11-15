@@ -1,6 +1,6 @@
 # visuals
 
-Форк конфигурации рендера из `techfriends-eng/bds-wiki-visualizer@2dd520b` (`config/`, `Dockerfile`):
+Форк конфигурации рендера из `techfriends-eng/bds-wiki-visualizer@5658090` (`config/`, `Dockerfile`):
 `image_spec.json` (1200×800), `mermaid_theme_override.json` (шрифт 26px, отступы),
 `puppeteer-config.json`. Цветов здесь нет: тема, фон и цвет подписей дуг собираются из `brand` сайта
 (`src/lib/brand/brand.ts`) и передаются в mmdc файлом на каждую схему. Почему именно эти параметры — комментарии `scripts/lib/mermaid_render.sh`
