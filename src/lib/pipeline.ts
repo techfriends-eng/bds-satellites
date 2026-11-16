@@ -12,7 +12,8 @@ import { lint } from "./gates/checks.ts";
 import { finish, gate, rework, slugOf, type GateDeps } from "./gates/run.ts";
 import { refreshSource, writeDraft, type Candidate } from "./generate/draft.ts";
 import { createJournal, type Journal, type Query } from "./journal/journal.ts";
-import { BudgetExceeded, createLlm, OPENROUTER } from "./llm/client.ts";
+import { createClaudeCli } from "./llm/claude-cli.ts";
+import { BudgetExceeded, createLlm, OPENROUTER, parseModel } from "./llm/client.ts";
 import { publishDraft } from "./publish/wp.ts";
 import { manualPath } from "./research/source.ts";
 import { pick, score } from "./select/rank.ts";
@@ -35,13 +36,14 @@ import { dockerCli, finalizePreview, forgetSchemes, renderScheme } from "./visua
  * Секреты — readSecret (переменная или файл из NAME_FILE, handbook standards/05).
  */
 /**
- * Модели превью (ADR 0002): основная — из `llm.models.image` сайта, откат — вторая модель пары.
+ * Модели превью (ADR 0002): список `llm.models.image` сайта. Задана одна — откат на вторую модель пары.
  * Раньше откат был жёстко 2.5-flash, и при основной 2.5-flash отката не было бы вовсе.
  */
 export const IMAGE_MODELS = ["google/gemini-2.5-flash-image", "google/gemini-3-pro-image-preview"];
 
-export function imageModels(primary: string): string[] {
-  return [primary, ...IMAGE_MODELS.filter((m) => m !== primary)];
+export function imageModels(models: string[]): string[] {
+  const ids = models.map((m) => parseModel(m).id);
+  return ids.length > 1 ? ids : [...ids, ...IMAGE_MODELS.filter((m) => !ids.includes(m))];
 }
 
 export const STEPS = [
@@ -327,7 +329,13 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
           finalizePreview(dockerCli, image, d.dir, uid, raw, preview.file, brand.background);
         } catch (err) {
           if (err instanceof PreviewFailed && err.costUsd > 0) {
-            llm.charge("image", ctx.cfg.llm.models.image, err.costUsd, d.candidate_id, false);
+            llm.charge(
+              "image",
+              imageModels(ctx.cfg.llm.models.image)[0],
+              err.costUsd,
+              d.candidate_id,
+              false,
+            );
           }
           ctx.previewFailed.add(d.candidate_id);
           errorOf(ctx, "превью", d.candidate_id, err);
@@ -477,6 +485,12 @@ export async function main(argv: string[]): Promise<number> {
     createLedger({
       project: "bds-satellites",
       query: await pgQuery(optionalSecret("LLM_LEDGER_DB_URL")),
+    }),
+    // Подписка Claude (ADR 0002): токен из CLAUDE_CODE_OAUTH_TOKEN или _FILE; нет — claude-cli
+    // откатывается на следующую модель этапа.
+    createClaudeCli(cfg.llm.claudeCli, join(stateDir, "claude-limits.json"), {
+      ...process.env,
+      CLAUDE_CODE_OAUTH_TOKEN: optionalSecret("CLAUDE_CODE_OAUTH_TOKEN") ?? undefined,
     }),
   );
   const ctx: Ctx = {

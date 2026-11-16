@@ -36,6 +36,10 @@ check "образ bds-sat-visuals:$(cat "$PKG/VERSION")" docker image inspect "b
 for v in SAT_SITE_DIR SAT_STATE_DIR OPENROUTER_API_KEY WP_URL WP_USER WP_APP_PASSWORD SAT_DB_URL; do
   check "$v задан" test -n "${!v:-}"
 done
+if grep -q 'claude-cli:' "${SAT_SITE_DIR:-/nonexistent}/config/site.yaml" 2>/dev/null; then
+  check "claude-cli: бинарь ${SAT_CLAUDE_BIN:-claude}" command -v "${SAT_CLAUDE_BIN:-claude}"
+  check "claude-cli: CLAUDE_CODE_OAUTH_TOKEN задан" test -n "${CLAUDE_CODE_OAUTH_TOKEN:-}${CLAUDE_CODE_OAUTH_TOKEN_FILE:-}"
+fi
 check "каталог состояния пишется" test -w "${SAT_STATE_DIR:-/nonexistent}"
 check "конфиг сайта читается" node "$PKG/dist/cli.js" sync --check-config
 check "brand сходится с главной сайта" node "$PKG/dist/cli.js" brand-check

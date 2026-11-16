@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { CLI_DEFAULTS, type CliOptions } from "../llm/claude-cli.ts";
+import { parseModel } from "../llm/client.ts";
 import { homedir } from "node:os";
 import { parse } from "yaml";
 import { parseBrand, type Brand } from "../brand/brand.ts";
@@ -38,9 +40,12 @@ export type SiteConfig = {
     maxFetches: number;
   };
   llm: {
-    models: Record<"select" | "plan" | "write" | "fix" | "review" | "revise" | "image", string>;
+    /** Список моделей этапа с откатом по порядку (ADR 0002); в YAML можно строкой — список из одной. */
+    models: Record<"select" | "plan" | "write" | "fix" | "review" | "revise" | "image", string[]>;
     reasoning: Partial<Record<string, Record<string, unknown>>>;
     maxCostPerRunUsd: number;
+    /** Пороги подписки для `claude-cli:` (claude-cli.ts). */
+    claudeCli: CliOptions;
   };
   stand: { base: string; maxFixes: number; images: string[]; memoryLimitMb: number; pyRun: string };
   gates: {
@@ -97,6 +102,32 @@ function parseDocsIndex(raw: Raw): DocsIndex | null {
   });
   if (!products.length) throw new Error("docs_index.products пуст");
   return { products, k: Number(d.k ?? 4), maxChars: Number(d.max_chars ?? 12_000) };
+}
+
+function parseLlm(raw: Raw): SiteConfig["llm"] {
+  const llm = section(raw, "llm", {
+    models: {} as Record<string, unknown>,
+    reasoning: {},
+    maxCostPerRunUsd: 2,
+    claudeCli: {} as Partial<CliOptions>,
+  });
+  const models: Record<string, string[]> = {};
+  for (const [stage, v] of Object.entries(llm.models ?? {})) {
+    const list = (Array.isArray(v) ? v : [v]).map(String).filter(Boolean);
+    if (!list.length) throw new Error(`llm.models.${stage}: пустой список`);
+    for (const m of list) {
+      const spec = parseModel(m);
+      if (stage === "image" && spec.provider !== "openrouter")
+        throw new Error(`llm.models.image: только OpenRouter (${m})`);
+    }
+    models[stage] = list;
+  }
+  return {
+    models: models as SiteConfig["llm"]["models"],
+    reasoning: llm.reasoning,
+    maxCostPerRunUsd: llm.maxCostPerRunUsd,
+    claudeCli: { ...CLI_DEFAULTS, ...llm.claudeCli },
+  };
 }
 
 export function parseSiteConfig(text: string): SiteConfig {
@@ -156,11 +187,7 @@ export function parseSiteConfig(text: string): SiteConfig {
       simhashMinWords: 20,
     }),
     select,
-    llm: section(raw, "llm", {
-      models: {} as SiteConfig["llm"]["models"],
-      reasoning: {},
-      maxCostPerRunUsd: 2,
-    }),
+    llm: parseLlm(raw),
     stand: section(raw, "stand", {
       base: "/var/lib/bds-sat/runs",
       maxFixes: 2,

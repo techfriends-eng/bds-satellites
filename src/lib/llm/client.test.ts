@@ -8,6 +8,7 @@ import {
 } from "@techfriends-eng/toolkit/llm";
 import { parseSiteConfig } from "../config/site.ts";
 import { openState } from "../store/db.ts";
+import type { ClaudeCli } from "./claude-cli.ts";
 import { BudgetExceeded, createLlm, parseJson, Truncated } from "./client.ts";
 
 const cfg = parseSiteConfig(`
@@ -128,4 +129,123 @@ test("llm: без журнала flush ничего не ждёт", async () => 
   const llm = createLlm(openState(":memory:"), cfg, fakeChat([{}]).chat);
   await llm.ask("select", "s", "u", 100);
   await llm.flush();
+});
+
+const multi = parseSiteConfig(`
+site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}
+select: {keywords: [kafka]}
+llm:
+  models: {review: [claude-cli:sonnet, openrouter:m-sonnet, m-backup], write: m-sonnet}
+  reasoning: {review: {effort: medium}}
+  maxCostPerRunUsd: 5
+`);
+
+function fakeCli(gate: { ok: boolean; why: string }, fail = false) {
+  const asks: { alias: string; effort?: string }[] = [];
+  const cli = {
+    allowed: async () => gate,
+    ask: async (alias: string, _s: string, _u: string, effort?: string) => {
+      asks.push({ alias, effort });
+      if (fail) throw new Error("claude-cli: сбой");
+      return {
+        text: "по подписке",
+        model: "claude-sonnet-5-5",
+        truncated: false,
+        usage: { promptTokens: 10, completionTokens: 5, reasoningTokens: 0, costUsd: 0 as const },
+      };
+    },
+  } satisfies ClaudeCli;
+  return { cli, asks };
+}
+
+test("конфиг: модель строкой — список из одной, список — как есть, чужой бэкенд — ошибка", () => {
+  assert.deepEqual(multi.llm.models.write, ["m-sonnet"]);
+  assert.deepEqual(multi.llm.models.review, [
+    "claude-cli:sonnet",
+    "openrouter:m-sonnet",
+    "m-backup",
+  ]);
+  assert.equal(multi.llm.claudeCli.fiveHourMax, 0.3);
+  assert.throws(
+    () => parseSiteConfig(multi_yaml("review: [ollama:host/qwen]")),
+    /ollama не поддержан/,
+  );
+  assert.throws(
+    () => parseSiteConfig(multi_yaml("image: [claude-cli:sonnet]")),
+    /только OpenRouter/,
+  );
+});
+
+function multi_yaml(models: string) {
+  return `site: {id: kafka, domain: kafka-school.ru}
+brand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}
+select: {keywords: [kafka]}
+llm: {models: {${models}}}
+`;
+}
+
+test("откат: подписка свободна — claude-cli, cost 0, provider claude-cli, effort этапа", async () => {
+  const db = openState(":memory:");
+  const { chat, seen } = fakeChat([{}]);
+  const { cli, asks } = fakeCli({ ok: true, why: "" });
+  const rows: unknown[][] = [];
+  const ledger = createLedger({
+    project: "bds-satellites",
+    query: async (_s, p) => void rows.push(p),
+  });
+  const llm = createLlm(db, multi, chat, ledger, cli);
+  assert.equal(await llm.ask("review", "s", "u", 100, 3), "по подписке");
+  await llm.flush();
+  assert.deepEqual(asks, [{ alias: "sonnet", effort: "medium" }]);
+  assert.equal(seen.length, 0);
+  assert.equal(llm.spent(), 0);
+  assert.deepEqual(rows[0].slice(1, 4), ["review", "claude-sonnet-5-5", "claude-cli"]);
+  const row = db.prepare("SELECT model, cost_usd FROM llm_calls").get() as { model: string };
+  assert.equal(row.model, "claude-cli:claude-sonnet-5-5");
+});
+
+test("откат: подписка занята — OpenRouter; первая не ответила — следующая", async () => {
+  const db = openState(":memory:");
+  const { cli, asks } = fakeCli({ ok: false, why: "окно 5 ч занято на 41 %, порог 30 %" });
+  // null — первая модель OpenRouter «не ответила после повторов», вторая отвечает
+  const results: (Partial<ChatResult> | null)[] = [null, {}];
+  const seen: string[] = [];
+  const chat = {
+    complete: async () => null,
+    completeDetailed: async (req: ChatRequest) => {
+      seen.push(req.model);
+      const r = results.shift();
+      return r
+        ? {
+            text: "ok",
+            model: req.model,
+            finishReason: "stop",
+            usage: { promptTokens: 1, completionTokens: 2, reasoningTokens: 0, costUsd: 0.03 },
+            ...r,
+          }
+        : null;
+    },
+  } satisfies ChatClient;
+  const llm = createLlm(db, multi, chat, undefined, cli);
+  assert.equal(await llm.ask("review", "s", "u", 100), "ok");
+  assert.equal(asks.length, 0);
+  assert.deepEqual(seen, ["m-sonnet", "m-backup"]);
+});
+
+test("откат: сбой claude-cli — дальше; все упали — последняя ошибка; без бэкенда — откат", async () => {
+  const db = openState(":memory:");
+  const { cli } = fakeCli({ ok: true, why: "" }, true);
+  const llm = createLlm(db, multi, fakeChat([{ text: "запасная" }]).chat, undefined, cli);
+  assert.equal(await llm.ask("review", "s", "u", 100), "запасная");
+  await assert.rejects(llm.ask("review", "s", "u", 100), /не ответила после повторов/);
+  const noCli = createLlm(db, multi, fakeChat([{ text: "без cli" }]).chat);
+  assert.equal(await noCli.ask("review", "s", "u", 100), "без cli");
+});
+
+test("откат: обрезанный ответ не откатывается", async () => {
+  const db = openState(":memory:");
+  const { chat, seen } = fakeChat([{ finishReason: "length" }, {}]);
+  const llm = createLlm(db, multi, chat, undefined, fakeCli({ ok: false, why: "занято" }).cli);
+  await assert.rejects(llm.ask("review", "s", "u", 100), Truncated);
+  assert.equal(seen.length, 1);
 });

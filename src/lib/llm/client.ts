@@ -1,6 +1,7 @@
 import type { ChatClient, Ledger } from "@techfriends-eng/toolkit/llm";
 import type { SiteConfig } from "../config/site.ts";
 import { nowIso, type Db } from "../store/db.ts";
+import type { ClaudeCli } from "./claude-cli.ts";
 
 /**
  * Вызов модели для этапов конвейера поверх toolkit/llm completeDetailed: журнал расхода в llm_calls,
@@ -8,10 +9,26 @@ import { nowIso, type Db } from "../store/db.ts";
  * gotchas/llm.md#claude5-reasoning), обрезанный ответ — ошибка с текстом, за который уже заплачено.
  * Каждый вызов и расход дублируется в общий журнал `llm.calls` на supan8n (bds-content ADR 0001, шаг 5c),
  * если передан `ledger`. Запись туда не ждёт ответа базы: `flush()` перед выходом.
+ *
+ * У этапа — список моделей с откатом (ADR 0002, п. 2): `openrouter:<id>` (или просто id) и
+ * `claude-cli:<alias>` (подписка, см. claude-cli.ts). Модель не ответила, упала или подписка занята —
+ * берётся следующая. Обрезанный ответ и потолок прогона не откатываются: это не сбой модели.
  */
 export const OPENROUTER = "https://openrouter.ai/api/v1";
 
 export type Stage = keyof SiteConfig["llm"]["models"];
+
+export type ModelSpec =
+  | { provider: "openrouter"; id: string }
+  | { provider: "claude-cli"; id: string };
+
+/** `openrouter:<id>`, `claude-cli:<alias>` или просто id OpenRouter. Остальное — ошибка конфига. */
+export function parseModel(spec: string): ModelSpec {
+  const m = spec.match(/^([a-z-]+):(.+)$/);
+  if (!m) return { provider: "openrouter", id: spec };
+  if (m[1] === "openrouter" || m[1] === "claude-cli") return { provider: m[1], id: m[2] };
+  throw new Error(`модель ${spec}: бэкенд ${m[1]} не поддержан (есть openrouter:, claude-cli:)`);
+}
 
 export class BudgetExceeded extends Error {}
 export class Truncated extends Error {
@@ -39,7 +56,13 @@ export type Llm = {
   flush(): Promise<void>;
 };
 
-export function createLlm(db: Db, cfg: SiteConfig, chat: ChatClient, ledger?: Ledger): Llm {
+export function createLlm(
+  db: Db,
+  cfg: SiteConfig,
+  chat: ChatClient,
+  ledger?: Ledger,
+  cli?: ClaudeCli,
+): Llm {
   let spent = 0;
   const pending: Promise<void>[] = [];
   const record = (entry: Parameters<Ledger["record"]>[0]) => {
@@ -61,49 +84,110 @@ export function createLlm(db: Db, cfg: SiteConfig, chat: ChatClient, ledger?: Le
       record({ stage, model, ref: candidateId, usage: { costUsd }, ok });
     },
     async ask(stage, system, user, maxTokens, candidateId) {
-      if (spent >= cfg.llm.maxCostPerRunUsd) {
-        throw new BudgetExceeded(
-          `потолок прогона $${cfg.llm.maxCostPerRunUsd} исчерпан ($${spent.toFixed(3)})`,
-        );
+      const models = cfg.llm.models[stage];
+      if (!models?.length) throw new Error(`llm.models.${stage} не задан в конфиге сайта`);
+      let lastErr: Error | undefined;
+      for (const [i, spec] of models.entries()) {
+        if (spent >= cfg.llm.maxCostPerRunUsd) {
+          throw new BudgetExceeded(
+            `потолок прогона $${cfg.llm.maxCostPerRunUsd} исчерпан ($${spent.toFixed(3)})`,
+          );
+        }
+        const next = models[i + 1] ? `, дальше ${models[i + 1]}` : "";
+        try {
+          const m = parseModel(spec);
+          if (m.provider === "claude-cli")
+            return await viaCli(m.id, stage, system, user, candidateId);
+          return await viaOpenRouter(m.id, stage, system, user, maxTokens, candidateId);
+        } catch (err) {
+          if (err instanceof Truncated || err instanceof BudgetExceeded) throw err;
+          lastErr = err as Error;
+          console.error(`${stage}: ${spec} — ${lastErr.message}${next}`);
+        }
       }
-      const model = cfg.llm.models[stage];
-      if (!model) throw new Error(`llm.models.${stage} не задан в конфиге сайта`);
-      const res = await chat.completeDetailed({
-        model,
-        system,
-        user,
-        maxTokens,
-        timeoutMs: 600_000,
-        headers: { "HTTP-Referer": `https://${cfg.domain}`, "X-Title": "bds-satellites" },
-        body: {
-          usage: { include: true },
-          ...(cfg.llm.reasoning[stage] ? { reasoning: cfg.llm.reasoning[stage] } : {}),
-        },
-      });
-      if (!res) throw new Error(`${stage}: модель не ответила после повторов`);
-      spent += res.usage.costUsd;
-      const u = res.usage;
-      log.run(
-        nowIso(),
-        stage,
-        model,
-        candidateId ?? null,
-        u.promptTokens,
-        u.completionTokens,
-        u.reasoningTokens,
-        u.costUsd,
-      );
-      record({
-        stage,
-        model: res.model,
-        ref: candidateId,
-        usage: u,
-        ok: res.finishReason !== "length",
-      });
-      if (res.finishReason === "length") throw new Truncated(stage, maxTokens, res.text);
-      return res.text;
+      throw lastErr ?? new Error(`${stage}: ни одна модель не ответила`);
     },
   };
+
+  async function viaOpenRouter(
+    model: string,
+    stage: Stage,
+    system: string,
+    user: string,
+    maxTokens: number,
+    candidateId?: number,
+  ): Promise<string> {
+    const res = await chat.completeDetailed({
+      model,
+      system,
+      user,
+      maxTokens,
+      timeoutMs: 600_000,
+      headers: { "HTTP-Referer": `https://${cfg.domain}`, "X-Title": "bds-satellites" },
+      body: {
+        usage: { include: true },
+        ...(cfg.llm.reasoning[stage] ? { reasoning: cfg.llm.reasoning[stage] } : {}),
+      },
+    });
+    if (!res) throw new Error(`${stage}: модель не ответила после повторов`);
+    spent += res.usage.costUsd;
+    const u = res.usage;
+    log.run(
+      nowIso(),
+      stage,
+      model,
+      candidateId ?? null,
+      u.promptTokens,
+      u.completionTokens,
+      u.reasoningTokens,
+      u.costUsd,
+    );
+    record({
+      stage,
+      model: res.model,
+      ref: candidateId,
+      usage: u,
+      ok: res.finishReason !== "length",
+    });
+    if (res.finishReason === "length") throw new Truncated(stage, maxTokens, res.text);
+    return res.text;
+  }
+
+  /** Подписка: денег прогона не тратит (cost 0), в журнал идёт с provider claude-cli. */
+  async function viaCli(
+    alias: string,
+    stage: Stage,
+    system: string,
+    user: string,
+    candidateId?: number,
+  ): Promise<string> {
+    if (!cli) throw new Error("бэкенд claude-cli не подключён");
+    const gate = await cli.allowed();
+    if (!gate.ok) throw new Error(gate.why);
+    const effort = cfg.llm.reasoning[stage]?.effort;
+    const res = await cli.ask(alias, system, user, typeof effort === "string" ? effort : undefined);
+    const u = res.usage;
+    log.run(
+      nowIso(),
+      stage,
+      `claude-cli:${res.model}`,
+      candidateId ?? null,
+      u.promptTokens,
+      u.completionTokens,
+      0,
+      0,
+    );
+    record({
+      stage,
+      model: res.model,
+      provider: "claude-cli",
+      ref: candidateId,
+      usage: u,
+      ok: !res.truncated,
+    });
+    if (res.truncated) throw new Truncated(stage, 0, res.text);
+    return res.text;
+  }
 }
 
 /** Первое цельное JSON-значение с позиции start: баланс скобок с учётом строк и экранирования. */
