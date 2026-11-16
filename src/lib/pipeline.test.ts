@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BudgetExceeded } from "./llm/client.ts";
-import { RUN_STEPS, runSteps, type Step } from "./pipeline.ts";
+import { imageModels, RUN_STEPS, runSteps, type Step } from "./pipeline.ts";
 
 async function play(failAt: Step, err: Error): Promise<{ done: Step[]; error: string | null }> {
   const done: Step[] = [];
@@ -44,4 +44,15 @@ test("другая ошибка останавливает прогон", async 
   const { done, error } = await play("gates", new Error("сбой"));
   assert.equal(done.at(-1), "gates");
   assert.equal(error, "сбой");
+});
+
+test("превью: откат — вторая модель пары, без повтора основной", () => {
+  assert.deepEqual(imageModels("google/gemini-2.5-flash-image"), [
+    "google/gemini-2.5-flash-image",
+    "google/gemini-3-pro-image-preview",
+  ]);
+  assert.deepEqual(imageModels("google/gemini-3-pro-image-preview"), [
+    "google/gemini-3-pro-image-preview",
+    "google/gemini-2.5-flash-image",
+  ]);
 });

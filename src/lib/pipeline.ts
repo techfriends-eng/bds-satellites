@@ -34,6 +34,16 @@ import { dockerCli, finalizePreview, forgetSchemes, renderScheme } from "./visua
  *   SAT_PKG_DIR    — этот пакет (prompts/, style/, lint/, visuals/), по умолчанию рядом с src/
  * Секреты — readSecret (переменная или файл из NAME_FILE, handbook standards/05).
  */
+/**
+ * Модели превью (ADR 0002): основная — из `llm.models.image` сайта, откат — вторая модель пары.
+ * Раньше откат был жёстко 2.5-flash, и при основной 2.5-flash отката не было бы вовсе.
+ */
+export const IMAGE_MODELS = ["google/gemini-2.5-flash-image", "google/gemini-3-pro-image-preview"];
+
+export function imageModels(primary: string): string[] {
+  return [primary, ...IMAGE_MODELS.filter((m) => m !== primary)];
+}
+
 export const STEPS = [
   "collect",
   "select",
@@ -307,7 +317,7 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
         try {
           const img = await generatePreview({
             apiKey,
-            models: [ctx.cfg.llm.models.image, "google/gemini-2.5-flash-image"],
+            models: imageModels(ctx.cfg.llm.models.image),
             prompt: brandPreviewPrompt(preview.prompt, brand),
           });
           // Расход пишем до сборки JPEG: картинка оплачена, даже если сборка упадёт.
