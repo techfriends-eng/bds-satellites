@@ -1,4 +1,4 @@
-import type { ChatClient } from "@techfriends-eng/toolkit/llm";
+import type { ChatClient, Ledger } from "@techfriends-eng/toolkit/llm";
 import type { SiteConfig } from "../config/site.ts";
 import { nowIso, type Db } from "../store/db.ts";
 
@@ -6,6 +6,8 @@ import { nowIso, type Db } from "../store/db.ts";
  * Вызов модели для этапов конвейера поверх toolkit/llm completeDetailed: журнал расхода в llm_calls,
  * потолок расхода на прогон, рассуждение этапа (у Claude 5 — только effort, handbook
  * gotchas/llm.md#claude5-reasoning), обрезанный ответ — ошибка с текстом, за который уже заплачено.
+ * Каждый вызов и расход дублируется в общий журнал `llm.calls` на supan8n (bds-content ADR 0001, шаг 5c),
+ * если передан `ledger`. Запись туда не ждёт ответа базы: `flush()` перед выходом.
  */
 export const OPENROUTER = "https://openrouter.ai/api/v1";
 
@@ -31,12 +33,18 @@ export type Llm = {
   spent(): number;
   /** Потолок прогона исчерпан: платные вызовы дальше не делаются. */
   exhausted(): boolean;
-  /** Расход вне ask (картинки): в журнал llm_calls и в потолок прогона. */
-  charge(stage: Stage, model: string, costUsd: number, candidateId?: number): void;
+  /** Расход вне ask (картинки): в журнал llm_calls и в потолок прогона. ok=false — оплачено, но не годно. */
+  charge(stage: Stage, model: string, costUsd: number, candidateId?: number, ok?: boolean): void;
+  /** Дождаться записей в общий журнал (перед выходом процесса). */
+  flush(): Promise<void>;
 };
 
-export function createLlm(db: Db, cfg: SiteConfig, chat: ChatClient): Llm {
+export function createLlm(db: Db, cfg: SiteConfig, chat: ChatClient, ledger?: Ledger): Llm {
   let spent = 0;
+  const pending: Promise<void>[] = [];
+  const record = (entry: Parameters<Ledger["record"]>[0]) => {
+    if (ledger) pending.push(ledger.record({ provider: "openrouter", site: cfg.siteId, ...entry }));
+  };
   const log = db.prepare(
     `INSERT INTO llm_calls (at, stage, model, candidate_id, prompt_tokens, completion_tokens, reasoning_tokens, cost_usd)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -44,9 +52,13 @@ export function createLlm(db: Db, cfg: SiteConfig, chat: ChatClient): Llm {
   return {
     spent: () => spent,
     exhausted: () => spent >= cfg.llm.maxCostPerRunUsd,
-    charge(stage, model, costUsd, candidateId) {
+    async flush() {
+      await Promise.all(pending.splice(0));
+    },
+    charge(stage, model, costUsd, candidateId, ok = true) {
       spent += costUsd;
       log.run(nowIso(), stage, model, candidateId ?? null, 0, 0, 0, costUsd);
+      record({ stage, model, ref: candidateId, usage: { costUsd }, ok });
     },
     async ask(stage, system, user, maxTokens, candidateId) {
       if (spent >= cfg.llm.maxCostPerRunUsd) {
@@ -81,6 +93,13 @@ export function createLlm(db: Db, cfg: SiteConfig, chat: ChatClient): Llm {
         u.reasoningTokens,
         u.costUsd,
       );
+      record({
+        stage,
+        model: res.model,
+        ref: candidateId,
+        usage: u,
+        ok: res.finishReason !== "length",
+      });
       if (res.finishReason === "length") throw new Truncated(stage, maxTokens, res.text);
       return res.text;
     },

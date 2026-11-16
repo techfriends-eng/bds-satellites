@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ChatClient, ChatRequest, ChatResult } from "@techfriends-eng/toolkit/llm";
+import {
+  createLedger,
+  type ChatClient,
+  type ChatRequest,
+  type ChatResult,
+} from "@techfriends-eng/toolkit/llm";
 import { parseSiteConfig } from "../config/site.ts";
 import { openState } from "../store/db.ts";
 import { BudgetExceeded, createLlm, parseJson, Truncated } from "./client.ts";
@@ -24,6 +29,7 @@ function fakeChat(results: Partial<ChatResult>[]) {
       return r
         ? {
             text: "ok",
+            model: req.model,
             finishReason: "stop",
             usage: { promptTokens: 1, completionTokens: 2, reasoningTokens: 0, costUsd: 0.03 },
             ...r,
@@ -74,4 +80,52 @@ test("расход картинки идёт в журнал и в потоло�
     { ...(row as object) },
     { stage: "image", model: "m-image", candidate_id: 7, cost_usd: 0.06 },
   );
+});
+
+test("llm: общий журнал — строка на вызов и на картинку, сайт и кандидат, обрезанный — ok=false", async () => {
+  const db = openState(":memory:");
+  const { chat } = fakeChat([{ model: "anthropic/claude-sonnet-5.5" }, { finishReason: "length" }]);
+  const rows: unknown[][] = [];
+  const ledger = createLedger({
+    project: "bds-satellites",
+    query: async (_s, p) => void rows.push(p),
+  });
+  const llm = createLlm(db, { ...cfg, llm: { ...cfg.llm, maxCostPerRunUsd: 5 } }, chat, ledger);
+  await llm.ask("write", "s", "u", 100, 7);
+  await assert.rejects(llm.ask("select", "s", "u", 100), Truncated);
+  llm.charge("image", "google/gemini-3-pro-image", 0.12, 7, false);
+  await llm.flush();
+  // project, stage, model, provider, site, ref, prompt, completion, reasoning, cost, cached, ok
+  assert.deepEqual(rows[0].slice(0, 12), [
+    "bds-satellites",
+    "write",
+    "anthropic/claude-sonnet-5.5",
+    "openrouter",
+    "kafka",
+    "7",
+    1,
+    2,
+    0,
+    0.03,
+    false,
+    true,
+  ]);
+  assert.equal(rows[1][1], "select");
+  assert.equal(rows[1][11], false);
+  assert.deepEqual(rows[2].slice(0, 6), [
+    "bds-satellites",
+    "image",
+    "google/gemini-3-pro-image",
+    "openrouter",
+    "kafka",
+    "7",
+  ]);
+  assert.equal(rows[2][9], 0.12);
+  assert.equal(rows[2][11], false);
+});
+
+test("llm: без журнала flush ничего не ждёт", async () => {
+  const llm = createLlm(openState(":memory:"), cfg, fakeChat([{}]).chat);
+  await llm.ask("select", "s", "u", 100);
+  await llm.flush();
 });

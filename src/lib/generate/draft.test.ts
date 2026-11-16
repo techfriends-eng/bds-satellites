@@ -22,6 +22,7 @@ function fakeLlm(answers: Partial<Record<Stage, string>>) {
     spent: () => 0,
     exhausted: () => false,
     charge: () => {},
+    flush: async () => {},
     ask: async (stage, system, user) => {
       asked.push({ stage, system, user });
       return answers[stage] ?? "";
@@ -218,6 +219,7 @@ test("черновик: write упал — следующий прогон бе�
     spent: () => 0,
     exhausted: () => false,
     charge: () => {},
+    flush: async () => {},
     ask: async (stage) => {
       if (stage === "plan") return plan;
       throw new Error("write: модель не ответила после повторов");

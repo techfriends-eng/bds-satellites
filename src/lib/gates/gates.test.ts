@@ -76,6 +76,7 @@ function deps(db: ReturnType<typeof openState>, answers: Partial<Record<Stage, s
     spent: () => 0,
     exhausted: () => false,
     charge: () => {},
+    flush: async () => {},
     ask: async (stage) => answers[stage] ?? "",
   };
   return {
@@ -168,6 +169,7 @@ test("доводка: стенд с прошлого раза не прошёл 
     spent: () => 0,
     exhausted: () => false,
     charge: () => {},
+    flush: async () => {},
     ask: async (stage) => (
       stages.push(stage),
       stage === "review" ? '{"issues": [{"severity": "high", "quote": "q", "problem": "p"}]}' : ""
@@ -217,6 +219,7 @@ test("переделка: правка идёт и при чистых пров�
     spent: () => 0,
     exhausted: () => false,
     charge: () => {},
+    flush: async () => {},
     ask: async (stage, _system, user) => {
       if (stage !== "revise") return '{"issues": []}';
       prompts.push(user);
