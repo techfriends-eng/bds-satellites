@@ -5,15 +5,17 @@ handbook: v0.1. Общая часть конвейера (шаги, провер
 
 ## 1. Назначение
 
-Раз в неделю (__DAY__, 02:00 МСК) 1–2 статьи для __DOMAIN__ из лент сайта: задача своими словами, свой материал,
+Раз в неделю 1–2 статьи для __DOMAIN__ из лент сайта: задача своими словами, свой материал,
 практика с кодом, прогнанным на стенде, задания. Черновики в WordPress сайта, итоги в BDS Хабе.
+Конвейер идёт тактами (ADR 0002 §3 bds-satellites): таймер в 02, 10 и 18 МСК, за такт у темы один
+шаг; новые темы — первым тактом недели сайта (день `schedule.day`), расход — в потолке недели.
 
 ## 2. Архитектура
 
 ```mermaid
 flowchart LR
   eb[EventBridge: старт progon] --> t[bds-sat-__SITE__.timer]
-  t --> r[run-site.sh → sat run]
+  t --> r[run-site.sh → sat tick]
   r --> wp[(WordPress __DOMAIN__)]
   r --> sat[(база sat на auto08)]
   sat -. FDW .-> hub[BDS Хаб]
@@ -64,14 +66,14 @@ ssh progon 'sudo -u bds-sat-__SITE__ -H bash -lc "cd /opt/bds-sat-__SITE__ && no
   `OnFailure=alert@%n.service` в юните оставлен по handbook R1, но `alert@.service` на progon не ставится.
 - Сторож на auto08 `checks.d/bds-satellites.sh` (toolkit `check.sh`, раз в 15 минут, тема 620):
   `sat_last:__SITE__` — последний прогон закончился с ошибкой, сразу;
-  `sat_run:__SITE__` — нет прогона без ошибки 180/348 ч (пропущен один или два недельных прогона;
+  `sat_run:__SITE__` — нет прогона без ошибки 180/348 ч (сутки без такта — уже сбой, пороги пока недельные;
   упавший целиком прогон строки в `sat.runs` не оставляет и виден только так);
   `sat_stuck` — черновики без прохода проверок дольше 14 суток.
 - BDS Хаб, раздел «Спутники»: статьи, статусы, расход, ошибки за 7 дней.
 
 ## 8. Ежедневное сопровождение
 
-Раз в неделю после прогона: хаб → «Спутники» → черновики в WP (ссылка из таблицы), решение по каждому.
+Раз в неделю, когда черновики дошли до WP: хаб → «Спутники» → черновики в WP (ссылка из таблицы), решение по каждому.
 
 ## 9. Ручная проверка step-by-step
 
@@ -79,7 +81,7 @@ ssh progon 'sudo -u bds-sat-__SITE__ -H bash -lc "cd /opt/bds-sat-__SITE__ && no
 stand_progon.sh up
 ssh progon 'sudo -u bds-sat-__SITE__ -H bash -lc "set -a; . /etc/bds-sat-__SITE__.env; set +a; /opt/bds-sat-__SITE__/node_modules/bds-satellites/ops/selfcheck.sh"'   # все OK
 ssh progon 'sudo systemctl start bds-sat-__SITE__.service; journalctl -u bds-sat-__SITE__ -n 5 --no-pager'  # не в свой день — «пропуск»
-ssh progon 'sudo systemctl set-environment SAT_FORCE=1 && sudo systemctl start --no-block bds-sat-__SITE__.service && sudo systemctl unset-environment SAT_FORCE'   # полный прогон вне дня
+ssh progon 'sudo systemctl set-environment SAT_FORCE=1 && sudo systemctl start --no-block bds-sat-__SITE__.service && sudo systemctl unset-environment SAT_FORCE'   # полный прогон всех шагов (sat run)
 ssh progon 'systemctl is-active bds-sat-__SITE__; journalctl -u bds-sat-__SITE__ -n 30 --no-pager -o cat'   # inactive — готово, JSON итога в конце
 ```
 
@@ -97,7 +99,7 @@ ssh progon 'systemctl is-active bds-sat-__SITE__; journalctl -u bds-sat-__SITE__
 | Симптом | Причина | Действие |
 |---|---|---|
 | `sat_run` crit, progon выключен | EventBridge не стартовал инстанс | консоль AWS → расписание; разово `stand_progon.sh up` и §9 |
-| прогон «пропуск: чужие контейнеры» | на стенде идёт статья блога | ничего: следующий прогон через неделю, или §9 с `SAT_FORCE=1` |
+| прогон «пропуск: чужие контейнеры» | на стенде идёт статья блога | ничего: следующий такт через 8 часов |
 | WP 401 `rest_not_logged_in` | Wordfence или логин не тот | handbook gotchas/wordpress.md#app-password-401 |
 | статья обрезана, `finishReason=length` | рассуждение модели съело ответ | handbook gotchas/llm.md#claude5-reasoning |
 

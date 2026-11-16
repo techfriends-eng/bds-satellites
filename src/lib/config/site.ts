@@ -4,6 +4,7 @@ import { parseModel } from "../llm/client.ts";
 import { homedir } from "node:os";
 import { parse } from "yaml";
 import { parseBrand, type Brand } from "../brand/brand.ts";
+import { weekStart } from "../schedule.ts";
 
 /** Конфиг сайта-спутника: `config/site.yaml` в репо сайта (bds-sat-<site>). */
 
@@ -44,6 +45,8 @@ export type SiteConfig = {
     models: Record<"select" | "plan" | "write" | "fix" | "review" | "revise" | "image", string[]>;
     reasoning: Partial<Record<string, Record<string, unknown>>>;
     maxCostPerRunUsd: number;
+    /** Потолок недели сайта для тактов (ADR 0002 §3); по умолчанию равен потолку прогона. */
+    maxCostPerWeekUsd: number;
     /** Пороги подписки для `claude-cli:` (claude-cli.ts). */
     claudeCli: CliOptions;
   };
@@ -104,11 +107,18 @@ function parseDocsIndex(raw: Raw): DocsIndex | null {
   return { products, k: Number(d.k ?? 4), maxChars: Number(d.max_chars ?? 12_000) };
 }
 
+function parseSchedule(raw: Raw): SiteConfig["schedule"] {
+  const schedule = section(raw, "schedule", { day: "mon" });
+  weekStart(schedule.day); // неизвестный день — ошибка разбора, а не тихий сдвиг недели
+  return schedule;
+}
+
 function parseLlm(raw: Raw): SiteConfig["llm"] {
   const llm = section(raw, "llm", {
     models: {} as Record<string, unknown>,
     reasoning: {},
     maxCostPerRunUsd: 2,
+    maxCostPerWeekUsd: undefined as number | undefined,
     claudeCli: {} as Partial<CliOptions>,
   });
   const models: Record<string, string[]> = {};
@@ -126,6 +136,7 @@ function parseLlm(raw: Raw): SiteConfig["llm"] {
     models: models as SiteConfig["llm"]["models"],
     reasoning: llm.reasoning,
     maxCostPerRunUsd: llm.maxCostPerRunUsd,
+    maxCostPerWeekUsd: Number(llm.maxCostPerWeekUsd ?? llm.maxCostPerRunUsd),
     claudeCli: { ...CLI_DEFAULTS, ...llm.claudeCli },
   };
 }
@@ -203,7 +214,7 @@ export function parseSiteConfig(text: string): SiteConfig {
       maxRevisionsTotal: 4,
     }),
     publish,
-    schedule: section(raw, "schedule", { day: "mon" }),
+    schedule: parseSchedule(raw),
     bdsBase: String(
       (raw.bds as { base?: string } | undefined)?.base ?? "https://bigdataschool.ru",
     ).replace(/\/+$/, ""),

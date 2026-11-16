@@ -1,6 +1,6 @@
-# Недельный прогон __DOMAIN__ (bds-satellites, ADR 0001). Запускается таймером bds-sat-__SITE__.timer.
+# Такт __DOMAIN__ (bds-satellites, ADR 0001). Запускается таймером bds-sat-__SITE__.timer.
 [Unit]
-Description=bds-sat-__SITE__: недельный прогон __DOMAIN__
+Description=bds-sat-__SITE__: такт __DOMAIN__
 After=network-online.target docker.service
 Wants=network-online.target
 OnFailure=alert@%n.service

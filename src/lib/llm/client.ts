@@ -48,7 +48,7 @@ export type Llm = {
     candidateId?: number,
   ): Promise<string>;
   spent(): number;
-  /** Потолок прогона исчерпан: платные вызовы дальше не делаются. */
+  /** Потолок прогона или недели исчерпан: платные вызовы дальше не делаются. */
   exhausted(): boolean;
   /** Расход вне ask (картинки): в журнал llm_calls и в потолок прогона. ok=false — оплачено, но не годно. */
   charge(stage: Stage, model: string, costUsd: number, candidateId?: number, ok?: boolean): void;
@@ -62,8 +62,17 @@ export function createLlm(
   chat: ChatClient,
   ledger?: Ledger,
   cli?: ClaudeCli,
+  /** Расход недели сайта до этого процесса (такты, ADR 0002 §3); null — без потолка недели. */
+  weekBase: number | null = null,
 ): Llm {
   let spent = 0;
+  const over = (): string | null => {
+    const { maxCostPerRunUsd: run, maxCostPerWeekUsd: week } = cfg.llm;
+    if (spent >= run) return `потолок прогона $${run} исчерпан ($${spent.toFixed(3)})`;
+    if (weekBase !== null && weekBase + spent >= week)
+      return `потолок недели $${week} исчерпан ($${(weekBase + spent).toFixed(3)})`;
+    return null;
+  };
   const pending: Promise<void>[] = [];
   const record = (entry: Parameters<Ledger["record"]>[0]) => {
     if (ledger) pending.push(ledger.record({ provider: "openrouter", site: cfg.siteId, ...entry }));
@@ -74,7 +83,7 @@ export function createLlm(
   );
   return {
     spent: () => spent,
-    exhausted: () => spent >= cfg.llm.maxCostPerRunUsd,
+    exhausted: () => over() !== null,
     async flush() {
       await Promise.all(pending.splice(0));
     },
@@ -88,11 +97,8 @@ export function createLlm(
       if (!models?.length) throw new Error(`llm.models.${stage} не задан в конфиге сайта`);
       let lastErr: Error | undefined;
       for (const [i, spec] of models.entries()) {
-        if (spent >= cfg.llm.maxCostPerRunUsd) {
-          throw new BudgetExceeded(
-            `потолок прогона $${cfg.llm.maxCostPerRunUsd} исчерпан ($${spent.toFixed(3)})`,
-          );
-        }
+        const ceiling = over();
+        if (ceiling) throw new BudgetExceeded(ceiling);
         const next = models[i + 1] ? `, дальше ${models[i + 1]}` : "";
         try {
           const m = parseModel(spec);

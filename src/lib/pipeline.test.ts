@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BudgetExceeded } from "./llm/client.ts";
-import { imageModels, RUN_STEPS, runSteps, type Step } from "./pipeline.ts";
+import { imageModels, RUN_STEPS, runSteps, tickSteps, type Step } from "./pipeline.ts";
 
 async function play(failAt: Step, err: Error): Promise<{ done: Step[]; error: string | null }> {
   const done: Step[] = [];
@@ -57,4 +57,11 @@ test("превью: откат — вторая модель пары, без п
   ]);
   // Список в конфиге — как есть, без пары; префикс openrouter: снимается
   assert.deepEqual(imageModels(["openrouter:a/img", "b/img"]), ["a/img", "b/img"]);
+});
+
+test("tickSteps: новые темы только первым тактом недели", () => {
+  assert.deepEqual(tickSteps(true), RUN_STEPS);
+  const t = tickSteps(false);
+  assert.ok(!t.includes("collect") && !t.includes("select"));
+  assert.deepEqual(t, ["visuals", "draft", "stand", "gates", "revise", "visuals", "publish"]);
 });
