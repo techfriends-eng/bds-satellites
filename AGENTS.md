@@ -26,7 +26,8 @@ npm run gate
 
 - `style/upstream/` — копия правил bds-article. Обновление — новая копия с коммитом исходника в шапке,
   отличия спутников — только в `style/sat-delta.md`.
-- `lint/sat_lint.py` — форк `bds-wiki-articles/wiki_lint.py`. Правки ограничены профилем `sat`; общие
-  проверки меняются в исходнике, потом переносятся сюда.
+- `lint/sat_lint.py`, `lint/wiki_unwrap.py` — копии общего линтера `techfriends-eng/bds-content`
+  (`lint/content_lint.py`, `lint/wiki_unwrap.py`, bds-content ADR 0001, п. 2). Здесь не правятся, даже профиль
+  `sat`: правка идёт в bds-content, сюда приходит новая копия целиком с новым `@sha` в шапке.
 - `visuals/*.json`, `visuals/Dockerfile` — параметры рендера из wiki_visualizer с причинами в исходнике.
 - Код bds-article, wiki_lint, wiki_visualizer, Stack Radar — рабочие системы: форк да, правка на месте — нет.

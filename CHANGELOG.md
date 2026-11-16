@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [0.1.28] — 2026-11-16
+
+### Изменено
+- `lint/sat_lint.py` и `lint/wiki_unwrap.py` — копии общего линтера `bds-content@e7c8170` (`lint/content_lint.py`,
+  bds-content ADR 0001, п. 2) вместо форка `bds-wiki-articles/wiki_lint.py`. Вердикты те же: на эталонных тестах и
+  186 черновиках JSON совпадает со старым sat_lint. Отличие только в тексте: провал объёма пишет «N, меньше 1500».
+  Профиль sat теперь меняется в bds-content.
+
 ## [0.1.27] — 2026-11-16
 
 ### Изменено

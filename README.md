@@ -25,7 +25,7 @@ SAT_SITE_DIR=../bds-sat-kafka SAT_STATE_DIR=/tmp/sat scripts/sat.mjs collect
 |---|---|
 | `src/lib/` | домены: `sources`, `dedup`, `select`, `research`, `generate`, `stand`, `gates`, `visuals`, `publish`, `journal`; `pipeline.ts` — сборка |
 | `style/` | форк правил bds-article (`upstream/`, не правится) и отличия спутников (`sat-delta.md`) |
-| `lint/` | форк `wiki_lint.py` с профилем `sat` и эталонными тестами |
+| `lint/` | копия общего линтера bds-content (`sat_lint.py`, профиль `sat`) и эталонные тесты |
 | `prompts/` | промпты этапов; сайт дописывает свои в `prompts/site/` своего репо |
 | `visuals/` | форк рендера wiki_visualizer: Dockerfile, конфиги Mermaid |
 | `ops/` | `run-site.sh` (юнит сайта), `deploy-site.sh`, `selfcheck.sh`, `new-site.sh`, `checks.d/` для auto08 |
