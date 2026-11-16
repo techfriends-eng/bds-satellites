@@ -24,6 +24,8 @@ npm run gate
 
 ## Чего не трогать
 
+- `style/content-rules.md` — копия общих правил R1–R6 `bds-content/rules/content-rules.md`, идёт в промпты plan,
+  write и revise блоком `{content_rules}`. Здесь не правится: правка в bds-content, сюда новая копия целиком.
 - `style/upstream/` — копия правил bds-article. Обновление — новая копия с коммитом исходника в шапке,
   отличия спутников — только в `style/sat-delta.md`.
 - `lint/sat_lint.py`, `lint/wiki_unwrap.py` — копии общего линтера `techfriends-eng/bds-content`

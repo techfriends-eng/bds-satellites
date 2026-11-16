@@ -126,7 +126,12 @@ export async function writeDraft(deps: DraftDeps, row: Candidate): Promise<strin
       return null;
     }
     const source = read.text;
-    const p = render(promptDirs, "plan", cfg, { meta, source, sat_delta: style.satDelta });
+    const p = render(promptDirs, "plan", cfg, {
+      meta,
+      source,
+      content_rules: style.contentRules,
+      sat_delta: style.satDelta,
+    });
     const plan = parseJson<Plan>(await llm.ask("plan", p.system, p.user, 8000, row.id));
     if (plan.verdict !== "take") {
       db.prepare("UPDATE candidates SET status = 'rejected', score_reason = ? WHERE id = ?").run(
@@ -167,6 +172,7 @@ export async function writeDraft(deps: DraftDeps, row: Candidate): Promise<strin
     source,
     docs: docs || "(нет)",
     style_guide: style.styleGuide,
+    content_rules: style.contentRules,
     sat_delta: style.satDelta,
   });
   let answer: string;
