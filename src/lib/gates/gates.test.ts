@@ -115,13 +115,14 @@ test("правка: вывод возвращается настоящий, см
     join(dir, ".work", "gates.json"),
     JSON.stringify({ ok: false, checks: {}, review: [] }),
   );
-  const fake = `=====ARTICLE=====\n<p>b</p>\n${pre("bash", "# run.sh\necho real")}\n<!-- output run.sh -->\n${pre("generic", "выдуманный")}\n=====META=====\n# m2`;
+  const fake = `=====FIND ARTICLE=====\n<p>a</p>\n=====REPLACE=====\n<p>b</p>\n=====FIND ARTICLE=====\nнастоящий вывод\n=====REPLACE=====\nвыдуманный\n=====FIND META=====\n# m\n=====REPLACE=====\n# m2`;
   const changed = await reviseOnce(deps(db, { revise: fake }), { candidate_id: 5, dir }, "s1");
   assert.equal(changed, false);
   const out = readFileSync(join(dir, "s1.html"), "utf8");
   assert.ok(out.includes("настоящий вывод") && !out.includes("выдуманный"));
   assert.ok(out.startsWith("<p>b</p>"));
-  const code = fake.replace("echo real", "echo new");
+  assert.equal(readFileSync(join(dir, "s1_meta.md"), "utf8"), "# m2\n");
+  const code = "=====FIND ARTICLE=====\necho real\n=====REPLACE=====\necho new";
   assert.equal(await reviseOnce(deps(db, { revise: code }), { candidate_id: 5, dir }, "s1"), true);
 });
 
@@ -132,8 +133,8 @@ test("правка: потерянная пометка вывода — пов�
     join(dir, ".work", "gates.json"),
     JSON.stringify({ ok: false, checks: {}, review: [] }),
   );
-  const lost = `=====ARTICLE=====\n<p>b</p>\n${pre("bash", "# run.sh\necho real")}\n=====META=====\n# m2`;
-  const good = `=====ARTICLE=====\n<p>c</p>\n${pre("bash", "# run.sh\necho real")}\n<!-- output run.sh -->\n${pre("generic", "x")}\n=====META=====\n# m3`;
+  const lost = `=====FIND ARTICLE=====\n<p>a</p>\n=====REPLACE=====\n<p>b</p>\n=====FIND ARTICLE=====\n<!-- output run.sh -->\n=====REPLACE=====\n`;
+  const good = `=====FIND ARTICLE=====\n<p>a</p>\n=====REPLACE=====\n<p>c</p>`;
   const users: string[] = [];
   const d = deps(db, {});
   const answers = [lost, good];
@@ -146,10 +147,30 @@ test("правка: потерянная пометка вывода — пов�
   assert.match(users[1], /места вывода пропали run\.sh/);
   assert.ok(readFileSync(join(dir, "s1.html"), "utf8").startsWith("<p>c</p>"));
   assert.ok(readFileSync(join(dir, ".work", "revise.rejected.html"), "utf8").includes("<p>b</p>"));
-  d.llm.ask = async () => lost;
+  d.llm.ask = async () => lost.replace("<p>a</p>", "<p>c</p>");
   await assert.rejects(
     reviseOnce(d, { candidate_id: 5, dir }, "s1"),
     /места вывода пропали run\.sh/,
+  );
+});
+
+test("правка: фрагмент не найден дословно — повтор с замечанием, статья не тронута до удачной пары", async () => {
+  const html = `<p>a</p>\n${pre("bash", "# run.sh\necho real")}`;
+  const { db, dir } = setup(html);
+  writeFileSync(
+    join(dir, ".work", "gates.json"),
+    JSON.stringify({ ok: false, checks: {}, review: [] }),
+  );
+  const miss = "=====FIND ARTICLE=====\n<p>а</p>\n=====REPLACE=====\n<p>b</p>";
+  const users: string[] = [];
+  const d = deps(db, {});
+  const answers = [miss, "=====ARTICLE=====\n<p>b</p>"];
+  d.llm.ask = async (_stage, _system, user) => (users.push(user), answers.shift() ?? miss);
+  await assert.rejects(reviseOnce(d, { candidate_id: 5, dir }, "s1"), /нет пар/);
+  assert.match(users[1], /фрагмента нет в статье дословно/);
+  assert.equal(readFileSync(join(dir, "s1.html"), "utf8"), html);
+  assert.ok(
+    readFileSync(join(dir, ".work", "revise.rejected.txt"), "utf8").includes("=====ARTICLE====="),
   );
 });
 
@@ -223,7 +244,8 @@ test("переделка: правка идёт и при чистых пров�
     ask: async (stage, _system, user) => {
       if (stage !== "revise") return '{"issues": []}';
       prompts.push(user);
-      return `=====ARTICLE=====\n${html}\n=====META=====\n# m2`;
+      const n = prompts.length; // каждый круг правит то, что оставил прошлый
+      return `=====FIND ARTICLE=====\nлид${"!".repeat(n - 1)} <a\n=====REPLACE=====\nлид${"!".repeat(n)} <a`;
     },
   };
   await rework(d, { candidate_id: 5, dir }, "s1");
