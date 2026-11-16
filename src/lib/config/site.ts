@@ -49,6 +49,11 @@ export type SiteConfig = {
     maxCostPerWeekUsd: number;
     /** Пороги подписки для `claude-cli:` (claude-cli.ts). */
     claudeCli: CliOptions;
+    /**
+     * A/B моделей черновика (ADR 0002 п. 2): тема получает вариант на первом вызове этапа из `stages`
+     * и держит его до конца; у варианта свой список моделей с откатом. Нет секции — A/B выключен.
+     */
+    ab?: { stages: string[]; variants: Record<string, string[]> };
   };
   stand: { base: string; maxFixes: number; images: string[]; memoryLimitMb: number; pyRun: string };
   gates: {
@@ -138,7 +143,27 @@ function parseLlm(raw: Raw): SiteConfig["llm"] {
     maxCostPerRunUsd: llm.maxCostPerRunUsd,
     maxCostPerWeekUsd: Number(llm.maxCostPerWeekUsd ?? llm.maxCostPerRunUsd),
     claudeCli: { ...CLI_DEFAULTS, ...llm.claudeCli },
+    ...(raw.llm && (raw.llm as Raw).ab ? { ab: parseAb((raw.llm as Raw).ab as Raw) } : {}),
   };
+}
+
+const AB_STAGES = ["plan", "write", "fix"];
+
+function parseAb(ab: Raw): NonNullable<SiteConfig["llm"]["ab"]> {
+  const stages = ((ab.stages as unknown[]) ?? AB_STAGES).map(String);
+  for (const s of stages)
+    if (!AB_STAGES.includes(s))
+      throw new Error(`llm.ab.stages: ${s}, можно ${AB_STAGES.join(", ")}`);
+  const variants: Record<string, string[]> = {};
+  for (const [name, v] of Object.entries((ab.variants as Raw) ?? {})) {
+    const list = (Array.isArray(v) ? v : [v]).map(String).filter(Boolean);
+    if (!list.length) throw new Error(`llm.ab.variants.${name}: пустой список`);
+    list.forEach((m) => parseModel(m));
+    variants[name] = list;
+  }
+  if (Object.keys(variants).length < 2)
+    throw new Error("llm.ab.variants: нужно два варианта или больше");
+  return { stages, variants };
 }
 
 export function parseSiteConfig(text: string): SiteConfig {

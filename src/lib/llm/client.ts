@@ -78,9 +78,31 @@ export function createLlm(
     if (ledger) pending.push(ledger.record({ provider: "openrouter", site: cfg.siteId, ...entry }));
   };
   const log = db.prepare(
-    `INSERT INTO llm_calls (at, stage, model, candidate_id, prompt_tokens, completion_tokens, reasoning_tokens, cost_usd)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO llm_calls (at, stage, model, candidate_id, prompt_tokens, completion_tokens, reasoning_tokens, cost_usd, variant)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
+  const ab = cfg.llm.ab;
+  /** Вариант темы: записан — тот же, нет — тот, у которого меньше тем (при равенстве — первый). */
+  const variantOf = (id: number): string => {
+    if (!ab) throw new Error("A/B не настроен");
+    const row = db.prepare("SELECT variant FROM candidates WHERE id = ?").get(id) as
+      | { variant: string | null }
+      | undefined;
+    if (row?.variant && ab.variants[row.variant]) return row.variant;
+    const used = new Map(
+      (
+        db
+          .prepare(
+            "SELECT variant, COUNT(*) AS n FROM candidates WHERE variant IS NOT NULL GROUP BY variant",
+          )
+          .all() as { variant: string; n: number }[]
+      ).map((r) => [r.variant, r.n]),
+    );
+    const names = Object.keys(ab.variants);
+    const pick = names.reduce((a, b) => ((used.get(b) ?? 0) < (used.get(a) ?? 0) ? b : a));
+    db.prepare("UPDATE candidates SET variant = ? WHERE id = ?").run(pick, id);
+    return pick;
+  };
   return {
     spent: () => spent,
     exhausted: () => over() !== null,
@@ -89,11 +111,15 @@ export function createLlm(
     },
     charge(stage, model, costUsd, candidateId, ok = true) {
       spent += costUsd;
-      log.run(nowIso(), stage, model, candidateId ?? null, 0, 0, 0, costUsd);
+      log.run(nowIso(), stage, model, candidateId ?? null, 0, 0, 0, costUsd, null);
       record({ stage, model, ref: candidateId, usage: { costUsd }, ok });
     },
     async ask(stage, system, user, maxTokens, candidateId) {
-      const models = cfg.llm.models[stage];
+      const variant =
+        ab && ab.stages.includes(stage) && candidateId !== undefined
+          ? variantOf(candidateId)
+          : null;
+      const models = variant ? ab!.variants[variant] : cfg.llm.models[stage];
       if (!models?.length) throw new Error(`llm.models.${stage} не задан в конфиге сайта`);
       let lastErr: Error | undefined;
       for (const [i, spec] of models.entries()) {
@@ -103,8 +129,8 @@ export function createLlm(
         try {
           const m = parseModel(spec);
           if (m.provider === "claude-cli")
-            return await viaCli(m.id, stage, system, user, candidateId);
-          return await viaOpenRouter(m.id, stage, system, user, maxTokens, candidateId);
+            return await viaCli(m.id, stage, system, user, candidateId, variant);
+          return await viaOpenRouter(m.id, stage, system, user, maxTokens, candidateId, variant);
         } catch (err) {
           if (err instanceof Truncated || err instanceof BudgetExceeded) throw err;
           lastErr = err as Error;
@@ -121,7 +147,8 @@ export function createLlm(
     system: string,
     user: string,
     maxTokens: number,
-    candidateId?: number,
+    candidateId: number | undefined,
+    variant: string | null,
   ): Promise<string> {
     const res = await chat.completeDetailed({
       model,
@@ -147,6 +174,7 @@ export function createLlm(
       u.completionTokens,
       u.reasoningTokens,
       u.costUsd,
+      variant,
     );
     record({
       stage,
@@ -165,7 +193,8 @@ export function createLlm(
     stage: Stage,
     system: string,
     user: string,
-    candidateId?: number,
+    candidateId: number | undefined,
+    variant: string | null,
   ): Promise<string> {
     if (!cli) throw new Error("бэкенд claude-cli не подключён");
     const gate = await cli.allowed();
@@ -182,6 +211,7 @@ export function createLlm(
       u.completionTokens,
       0,
       0,
+      variant,
     );
     record({
       stage,
