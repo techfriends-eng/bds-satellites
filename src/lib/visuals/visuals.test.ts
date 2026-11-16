@@ -4,8 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Brand } from "../brand/brand.ts";
-import { parseVisuals } from "./meta.ts";
-import { generatePreview, PreviewFailed } from "./preview.ts";
 import { forgetSchemes, renderScheme, type Docker } from "./render.ts";
 
 const BRAND: Brand = {
@@ -15,61 +13,6 @@ const BRAND: Brand = {
   text: "#232C3D",
 };
 const THEME = { brand: BRAND, base: { themeVariables: { fontSize: "26px" } } };
-
-const META = `# Метаданные статьи X
-
-- **Термин:** KRaft
-
-## Часть 2. Визуализации
-
-### Превью-картинка
-
-- **Имя файла:** \`kraft_quorum_preview.jpg\`
-- **ALT:** Три контроллера KRaft на стенде
-
-    Photorealistic server rack, three glowing nodes, palette #294A70 #FFAB1F.
-    No unreadable text.
-
-### Схема 1. Кворум
-
-- **Имя файла:** \`kraft_quorum_scheme1.jpg\`
-- **ALT:** Кворум из трёх контроллеров и брокер
-
-\`\`\`mermaid
-%%{init: {'theme':'base'}}%%
-flowchart LR
-  a --> b
-\`\`\`
-
-### Схема 2. Восстановление
-
-- **Имя файла:** \`kraft_quorum_scheme2.jpg\`
-- **ALT:** Порядок восстановления
-
-\`\`\`mermaid
-flowchart TD
-  x --> y
-\`\`\`
-
-## SEO
-`;
-
-test("метаданные: превью с промптом, схемы по номерам с кодом Mermaid", () => {
-  const v = parseVisuals(META);
-  assert.deepEqual(v.preview, {
-    file: "kraft_quorum_preview.jpg",
-    alt: "Три контроллера KRaft на стенде",
-    prompt:
-      "Photorealistic server rack, three glowing nodes, palette #294A70 #FFAB1F.\nNo unreadable text.",
-  });
-  assert.deepEqual(
-    v.schemes.map((s) => [s.n, s.file, s.mermaid.split("\n").pop()]),
-    [
-      [1, "kraft_quorum_scheme1.jpg", "  a --> b"],
-      [2, "kraft_quorum_scheme2.jpg", "  x --> y"],
-    ],
-  );
-});
 
 test("рендер схемы: mmdc с конфигами форка, JPG 1200x800 и чистка метаданных в одном контейнере", () => {
   const dir = mkdtempSync(join(tmpdir(), "vis-"));
@@ -126,123 +69,6 @@ test("рендер схемы: ошибка mmdc — исключение с х�
   );
 });
 
-test("превью: запасная модель маршрутом fallback, картинка из data URI, стоимость", async () => {
-  let sent: Record<string, unknown> = {};
-  const fake = (async (_u: string, init: RequestInit) => {
-    sent = JSON.parse(String(init.body));
-    return new Response(
-      JSON.stringify({
-        model: "google/gemini-2.5-flash-image",
-        usage: { cost: 0.04 },
-        choices: [
-          {
-            message: {
-              images: [
-                {
-                  image_url: {
-                    url: `data:image/png;base64,${Buffer.from("PNG").toString("base64")}`,
-                  },
-                },
-              ],
-            },
-          },
-        ],
-      }),
-    );
-  }) as unknown as typeof fetch;
-  const r = await generatePreview({ apiKey: "k", models: ["a", "b"], prompt: "p", fetch: fake });
-  assert.equal(r.bytes.toString(), "PNG");
-  assert.equal(r.ext, "png");
-  assert.equal(r.costUsd, 0.04);
-  assert.deepEqual(sent.models, ["a", "b"]);
-  assert.equal(sent.route, "fallback");
-  assert.deepEqual(sent.modalities, ["image", "text"]);
-});
-
-function imageFake(answers: { status?: number; body: string }[]) {
-  const sent: string[][] = [];
-  const fake = (async (_url: string, init: RequestInit) => {
-    sent.push((JSON.parse(String(init.body)) as { models: string[] }).models);
-    const a = answers[sent.length - 1];
-    return new Response(a.body, { status: a.status ?? 200 });
-  }) as unknown as typeof fetch;
-  return { fake, sent };
-}
-const NO_IMAGE = `${" ".repeat(400)}${JSON.stringify({
-  model: "m",
-  usage: { cost: 0.01 },
-  choices: [{ finish_reason: "stop", message: { content: "не могу" } }],
-})}`;
-const IMAGE = JSON.stringify({
-  usage: { cost: 0.04 },
-  choices: [{ message: { images: [{ image_url: { url: "data:image/png;base64,UE5H" } }] } }],
-});
-const noSleep = async () => {};
-
-test("превью: ответ без картинки повторяется со следующей модели, расход суммируется", async () => {
-  const { fake, sent } = imageFake([{ body: NO_IMAGE }, { body: IMAGE }]);
-  const r = await generatePreview({
-    apiKey: "k",
-    models: ["a", "b"],
-    prompt: "p",
-    fetch: fake,
-    sleep: noSleep,
-  });
-  assert.deepEqual(sent, [
-    ["a", "b"],
-    ["b", "a"],
-  ]);
-  assert.equal(r.costUsd, 0.05);
-});
-
-test("превью: три ответа без картинки — ошибка с причиной и расходом, а не пробелы", async () => {
-  const { fake, sent } = imageFake([{ body: NO_IMAGE }, { body: NO_IMAGE }, { body: NO_IMAGE }]);
-  await assert.rejects(
-    generatePreview({ apiKey: "k", models: ["a", "b"], prompt: "p", fetch: fake, sleep: noSleep }),
-    (e: unknown) =>
-      e instanceof PreviewFailed &&
-      /в ответе нет картинки \(m; stop; не могу\)/.test(e.message) &&
-      Math.abs(e.costUsd - 0.03) < 1e-9,
-  );
-  assert.equal(sent.length, 3);
-});
-
-test("превью: 402 не повторяется, 502 повторяется", async () => {
-  const empty = imageFake([{ status: 402, body: '{"error":{"message":"balance"}}' }]);
-  await assert.rejects(
-    generatePreview({
-      apiKey: "k",
-      models: ["a"],
-      prompt: "p",
-      fetch: empty.fake,
-      sleep: noSleep,
-    }),
-    /HTTP 402/,
-  );
-  assert.equal(empty.sent.length, 1);
-  const flaky = imageFake([{ status: 502, body: "bad gateway" }, { body: IMAGE }]);
-  const r = await generatePreview({
-    apiKey: "k",
-    models: ["a"],
-    prompt: "p",
-    fetch: flaky.fake,
-    sleep: noSleep,
-  });
-  assert.equal(flaky.sent.length, 2);
-  assert.equal(r.costUsd, 0.04);
-});
-
-test("метаданные: отклонения модели — превью под ##, промпт строкой, без маркеров", () => {
-  const v = parseVisuals(
-    "## Превью-картинка\n\n**Имя файла:** s_preview.jpg\n\n**ALT:** превью статьи\n\n**Промпт (Nano Banana Pro, 1200x800):** Photorealistic desk.\n\n## Схемы\n",
-  );
-  assert.deepEqual(v.preview, {
-    file: "s_preview.jpg",
-    alt: "превью статьи",
-    prompt: "Photorealistic desk.",
-  });
-});
-
 test("VERSION совпадает с package.json: по нему тег образа bds-sat-visuals и строка деплоя", () => {
   const pkg = join(import.meta.dirname, "../../..");
   const json = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8")) as { version: string };
@@ -266,17 +92,6 @@ test("сброс схем: файлы и записи схем уходят, п�
     Object.keys(JSON.parse(readFileSync(join(dir, ".work", "media.json"), "utf8"))),
     ["a_preview.jpg"],
   );
-});
-
-test("R5: forceLR меняет только направление сверху вниз", async () => {
-  const { forceLR } = await import("./render.ts");
-  assert.equal(forceLR("flowchart TD\n  a-->b"), "flowchart LR\n  a-->b");
-  assert.equal(
-    forceLR("graph BT\n  subgraph X\n    direction TB\n  end"),
-    "graph LR\n  subgraph X\n    direction LR\n  end",
-  );
-  assert.equal(forceLR('flowchart LR\n  a["TD"]-->b'), 'flowchart LR\n  a["TD"]-->b');
-  assert.equal(forceLR("sequenceDiagram\n  a->>b: x"), "sequenceDiagram\n  a->>b: x");
 });
 
 test("R5: вертикальная схема — в команде проверка высоты и перерисовка LR; горизонтальная — без неё", () => {

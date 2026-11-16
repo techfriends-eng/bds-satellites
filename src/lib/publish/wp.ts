@@ -5,7 +5,7 @@ import type { SiteConfig } from "../config/site.ts";
 import type { GatesReport } from "../gates/run.ts";
 import { draftPaths } from "../generate/draft.ts";
 import type { Db } from "../store/db.ts";
-import { parseVisuals } from "../visuals/meta.ts";
+import { parseVisuals } from "@techfriends-eng/toolkit/visuals";
 
 /**
  * Черновик в WordPress сайта через toolkit/wp. Пока статус всегда draft (publish.status).
