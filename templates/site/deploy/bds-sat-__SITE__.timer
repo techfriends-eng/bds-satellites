@@ -1,10 +1,11 @@
-# День — schedule.day в config/site.yaml (обёртка пропускает прогон в чужой день), 02:00 по Москве.
-# Persistent=true: progon включается по расписанию EventBridge, таймер догоняет пропущенный запуск.
+# Такты сайта (ADR 0002 §3): три раза в сутки, шаг на тему за такт; новые темы — с дня schedule.day.
+# progon включается расписанием EventBridge за 5 минут до окна; Persistent=true догоняет пропущенный такт.
+# У сайтов разные минуты (kafka :00, spark :15, python :30): такты не делят память стендов.
 [Unit]
-Description=bds-sat-__SITE__: недельный прогон, __DAY_UC__ 02:00 МСК
+Description=bds-sat-__SITE__: такты 02, 10, 18 МСК
 
 [Timer]
-OnCalendar=__DAY_UC__ *-*-* 02:00:00 Europe/Moscow
+OnCalendar=*-*-* 02,10,18:00:00 Europe/Moscow
 Persistent=true
 
 [Install]

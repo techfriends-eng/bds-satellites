@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Недельный прогон сайта на progon. ExecStart юнита bds-sat-<site>.service (окружение — /etc/bds-sat-<site>.env).
-#   - только в день schedule.day конфига: progon поднимают и для статей блога, а Persistent=true
-#     таймера догоняет пропуск при любом включении (SAT_FORCE=1 — прогон вне дня, вручную через юнит);
+# Такт сайта на progon (ADR 0002 §3). ExecStart юнита bds-sat-<site>.service (окружение — /etc/bds-sat-<site>.env).
+#   - таймер срабатывает несколько раз в сутки; `sat tick` делает у каждой темы не больше одного шага,
+#     новые темы выбирает первым тактом недели сайта (с 00:00 МСК schedule.day), расход — в потолке недели;
+#   - SAT_FORCE=1 — полный прогон всех шагов (`sat run`), вручную через юнит;
 #   - пауза: файл $SAT_STATE_DIR/PAUSE;
 #   - память: чужие контейнеры с лимитами больше 6 ГБ — ждём час, до 3 раз, затем пропуск с записью в журнал;
 #   - lock $RUNTIME_DIRECTORY/run.lock: сторож простоя progon считает сервер занятым, пока lock держит живой процесс.
@@ -10,12 +11,6 @@ set -euo pipefail
 PKG="$(cd "$(dirname "$0")/.." && pwd)"
 sat() { node --no-warnings=ExperimentalWarning "$PKG/dist/cli.js" "$@"; }
 
-day=$(sed -n 's/^schedule:.*day: *\([a-z]*\).*/\1/p' "$SAT_SITE_DIR/config/site.yaml")
-today=$(TZ=Europe/Moscow date +%a | tr '[:upper:]' '[:lower:]')
-if [ "${SAT_FORCE:-0}" != 1 ] && [ "$today" != "${day:-mon}" ]; then
-  echo "сегодня $today, день сайта ${day:-mon} — пропуск"
-  exit 0
-fi
 if [ -e "$SAT_STATE_DIR/PAUSE" ]; then
   echo "PAUSE — пропуск"
   exit 0
@@ -51,5 +46,7 @@ done
 
 # SAT_COMMAND — команда автора над черновиками через тот же юнит и lock: «rework 636», «rerender 11 15».
 # Без кавычек намеренно: команда и id разделяются пробелами.
+default=tick
+[ "${SAT_FORCE:-0}" = 1 ] && default=run
 # shellcheck disable=SC2086
-sat ${SAT_COMMAND:-run}
+sat ${SAT_COMMAND:-$default}

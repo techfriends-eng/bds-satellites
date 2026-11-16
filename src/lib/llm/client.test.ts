@@ -59,6 +59,27 @@ test("llm: модель и рассуждение этапа, журнал ра�
   assert.ok(Math.abs(llm.spent() - 0.06) < 1e-9);
 });
 
+test("llm: потолок недели — расход прошлых тактов плюс свой", async () => {
+  const week = parseSiteConfig(
+    `site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}
+select: {keywords: [kafka]}
+llm: {models: {write: m}, maxCostPerRunUsd: 1, maxCostPerWeekUsd: 0.1}
+`,
+  );
+  assert.equal(cfg.llm.maxCostPerWeekUsd, 0.05, "по умолчанию — потолок прогона");
+  const db = openState(":memory:");
+  const llm = createLlm(db, week, fakeChat([{}, {}]).chat, undefined, undefined, 0.08);
+  assert.equal(await llm.ask("write", "s", "u", 100), "ok");
+  assert.ok(llm.exhausted());
+  await assert.rejects(
+    llm.ask("write", "s", "u", 100),
+    /потолок недели \$0\.1 исчерпан \(\$0\.110\)/,
+  );
+  // Без weekBase (команды автора) потолок недели не действует.
+  const free = createLlm(db, week, fakeChat([{}]).chat, undefined, undefined, null);
+  assert.ok(!free.exhausted());
+});
+
 test("parseJson: код с ``` внутри строки, обёртка, текст вокруг", () => {
   const body = '{"cause": "x", "files": {"run.sh": "echo 1\\n```\\nnot json\\n```\\n"}}';
   assert.equal(parseJson<{ cause: string }>(body).cause, "x");

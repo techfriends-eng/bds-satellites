@@ -68,3 +68,13 @@ test("docs_index: продукты и версии, значения по умо
     /docs_index.products пуст/,
   );
 });
+
+test("schedule.day: неизвестный день — ошибка разбора", () => {
+  assert.throws(
+    () =>
+      parseSiteConfig(
+        `site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}\nselect: {keywords: [kafka]}\nschedule: {day: среда}\n`,
+      ),
+    /schedule\.day/,
+  );
+});

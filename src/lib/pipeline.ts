@@ -20,7 +20,8 @@ import { pick, score } from "./select/rank.ts";
 import { prefilter } from "./select/prefilter.ts";
 import { collect } from "./sources/collect.ts";
 import { checkDraft } from "./stand/check.ts";
-import { CANDIDATE_COLS, openState, type Db } from "./store/db.ts";
+import { CANDIDATE_COLS, nowIso, openState, type Db } from "./store/db.ts";
+import { weekStart } from "./schedule.ts";
 import { loadStyle } from "./style/rules.ts";
 import { parse } from "yaml";
 import { brandPreviewPrompt } from "./brand/brand.ts";
@@ -70,6 +71,16 @@ type AnyStep = Step | DraftCommand;
  * Прогон у потолка иначе оставляет их без превью снова (kafka 2 ноября, $3,12 ушло до шага visuals).
  */
 export const RUN_STEPS: Step[] = ["visuals", ...STEPS];
+/**
+ * Такт (ADR 0002 §3): таймер сайта срабатывает несколько раз в сутки, за такт у темы не больше одного
+ * шага из draft, stand, gates, revise. Превью, схемы и публикация готового идут в том же такте.
+ * Новые темы (collect, select) — первым тактом недели сайта.
+ */
+export function tickSteps(newTopics: boolean): Step[] {
+  return newTopics ? RUN_STEPS : RUN_STEPS.filter((s) => s !== "collect" && s !== "select");
+}
+/** Время последнего выбора тем (ISO UTC) в каталоге состояния: тактам не нужно выбирать темы снова. */
+const SELECTED_AT = "selected-at";
 /** После потолка идут только шаги без платных вызовов: схемы и публикация уже готового. */
 const AFTER_CEILING = new Set<AnyStep>(["rerender", "visuals", "publish"]);
 
@@ -93,7 +104,18 @@ type Ctx = {
   ids?: number[];
   /** Превью, что не вышло в этом прогоне: второй проход visuals за него не платит. */
   previewFailed: Set<number>;
+  stateDir: string;
+  /** Такт: темы, что уже сделали шаг; null — прогон без ограничения шагов. */
+  advanced: Set<number> | null;
 };
+
+/** Такт: можно ли теме сделать шаг. Да — шаг засчитан. */
+function stepAllowed(ctx: Ctx, id: number): boolean {
+  if (!ctx.advanced) return true;
+  if (ctx.advanced.has(id)) return false;
+  ctx.advanced.add(id);
+  return true;
+}
 
 /** Сколько нечитаемых кандидатов заменять за прогон: ниже — следующий прогон. */
 const MAX_UNREADABLE_PER_RUN = 10;
@@ -201,6 +223,7 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
   async select(ctx) {
     await score(ctx.db, ctx.cfg, ctx.gateDeps.llm, join(PKG, "prompts"));
     ctx.journal.stats.picked = pick(ctx.db, ctx.cfg);
+    writeFileSync(join(ctx.stateDir, SELECTED_AT), nowIso());
   },
   async draft(ctx) {
     const { db, cfg, journal, manualDir } = ctx;
@@ -219,10 +242,16 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
         db
           .prepare(`SELECT ${CANDIDATE_COLS} FROM candidates WHERE status = 'picked'`)
           .all() as Candidate[]
-      ).filter((r) => !tried.has(r.id) && (!ctx.ids?.length || ctx.ids.includes(r.id)));
+      ).filter(
+        (r) =>
+          !tried.has(r.id) &&
+          !ctx.advanced?.has(r.id) &&
+          (!ctx.ids?.length || ctx.ids.includes(r.id)),
+      );
       let unreadable = 0;
       for (const row of rows) {
         tried.add(row.id);
+        stepAllowed(ctx, row.id);
         journal.touch(row.id);
         try {
           await writeDraft(
@@ -253,6 +282,7 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
   },
   async stand(ctx) {
     for (const d of drafts(ctx.db, ["drafted"], ctx.ids)) {
+      if (!stepAllowed(ctx, d.candidate_id)) continue;
       ctx.journal.touch(d.candidate_id);
       try {
         await checkDraft(ctx.gateDeps, d, slugOf(d.dir));
@@ -263,6 +293,7 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
   },
   async gates(ctx) {
     for (const d of drafts(ctx.db, ["ran", "run_failed"], ctx.ids)) {
+      if (!stepAllowed(ctx, d.candidate_id)) continue;
       ctx.journal.touch(d.candidate_id);
       try {
         await gate(ctx.gateDeps, d, slugOf(d.dir));
@@ -273,6 +304,7 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
   },
   async revise(ctx) {
     for (const d of drafts(ctx.db, ["gate_failed"], ctx.ids)) {
+      if (!stepAllowed(ctx, d.candidate_id)) continue;
       ctx.journal.touch(d.candidate_id);
       dropStrayPreviews(d.dir);
       try {
@@ -462,18 +494,30 @@ export async function main(argv: string[]): Promise<number> {
     console.error(`sat ${command}: нужны id кандидатов`);
     return 2;
   }
+  const week = weekStart(cfg.schedule.day);
+  let selectedAt = "";
+  try {
+    selectedAt = readFileSync(join(stateDir, SELECTED_AT), "utf8").trim();
+  } catch {
+    // До v0.1.36 метки не было: время выбора — последняя оценка кандидата, иначе первый такт выберет темы снова.
+    selectedAt =
+      (db.prepare("SELECT MAX(scored_at) AS t FROM candidates").get() as { t: string | null }).t ??
+      "";
+  }
   const steps: readonly AnyStep[] =
     draftCommand ??
     (command === "run"
       ? RUN_STEPS
-      : command === "sync"
-        ? []
-        : STEPS.includes(command as Step)
-          ? [command as Step]
-          : []);
+      : command === "tick"
+        ? tickSteps(selectedAt < week)
+        : command === "sync"
+          ? []
+          : STEPS.includes(command as Step)
+            ? [command as Step]
+            : []);
   if (!steps.length && command !== "sync") {
     console.error(
-      `sat: неизвестная команда ${command}; есть run, sync, note, rework, rerender, brand-check, brand-suggest, ${STEPS.join(", ")}`,
+      `sat: неизвестная команда ${command}; есть run, tick, sync, note, rework, rerender, brand-check, brand-suggest, ${STEPS.join(", ")}`,
     );
     return 2;
   }
@@ -492,12 +536,22 @@ export async function main(argv: string[]): Promise<number> {
       ...process.env,
       CLAUDE_CODE_OAUTH_TOKEN: optionalSecret("CLAUDE_CODE_OAUTH_TOKEN") ?? undefined,
     }),
+    // Потолок недели — у прогонов по таймеру; команды автора над черновиками его не ждут.
+    command === "run" || command === "tick"
+      ? (
+          db
+            .prepare("SELECT COALESCE(SUM(cost_usd), 0) AS s FROM llm_calls WHERE at >= ?")
+            .get(week) as { s: number }
+        ).s
+      : null,
   );
   const ctx: Ctx = {
     db,
     cfg,
     journal,
     ids,
+    stateDir,
+    advanced: command === "tick" ? new Set() : null,
     draftsDir: join(stateDir, "drafts"),
     manualDir: join(stateDir, "source-text"),
     previewFailed: new Set(),

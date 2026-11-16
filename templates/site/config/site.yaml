@@ -39,6 +39,8 @@ llm:
     review: { effort: medium }
     revise: { effort: medium }
   maxCostPerRunUsd: 3
+  # Потолок недели сайта (с 00:00 МСК schedule.day) для тактов; без ключа равен maxCostPerRunUsd.
+  maxCostPerWeekUsd: 3
 
 stand:
   base: /var/lib/bds-sat-__SITE__/runs
