@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { outputsOf, parseArticle, setOutputs, splitAnswer } from "../article/html.ts";
+import { applyEdits, parseEdits, type Edit } from "../article/edits.ts";
+import { outputsOf, parseArticle, setOutputs } from "../article/html.ts";
 import { ARTICLE_MAX_TOKENS, draftPaths } from "../generate/draft.ts";
 import { parseJson } from "../llm/client.ts";
 import { render } from "../prompts/render.ts";
@@ -110,6 +111,15 @@ export function setDrift(before: Parsed, after: Parsed): string {
     .join("; ");
 }
 
+function editIssue(failed: string[]): Issue {
+  return {
+    severity: "high",
+    quote: "",
+    problem: `Прошлая правка не применилась: ${failed.join("; ")}.`,
+    fix: "Пришли все пары заново. FIND копируй из статьи дословно, символ в символ, и бери столько текста, чтобы фрагмент встречался в файле один раз.",
+  };
+}
+
 function setIssue(drift: string): Issue {
   return {
     severity: "high",
@@ -159,24 +169,42 @@ export async function reviseOnce(
     sat_delta: deps.style.satDelta,
   });
   const before = parseArticle(html);
-  let next = { article: "", meta: "" };
+  let next = { article: html, meta };
   let after = before;
-  let drift = "";
-  // Модель иногда теряет блок кода или пометку <!-- output ИМЯ -->: один повтор с прямым замечанием.
+  let problem: Issue | null = null;
+  // Модель иногда теряет блок кода, пометку <!-- output ИМЯ --> или цитирует фрагмент не дословно:
+  // один повтор с прямым замечанием. Пары повтора снова применяются к исходной статье.
   for (let attempt = 0; attempt < 2; attempt++) {
-    const u = drift ? `${user}\n\n${JSON.stringify([setIssue(drift)], null, 1)}` : user;
-    next = splitAnswer(
-      await deps.llm.ask("revise", system, u, ARTICLE_MAX_TOKENS, draft.candidate_id),
-    );
-    after = parseArticle(next.article);
-    drift = setDrift(before, after);
-    if (!drift) break;
-    writeFileSync(join(paths.work, "revise.rejected.html"), next.article);
+    const u = problem ? `${user}\n\n${JSON.stringify([problem], null, 1)}` : user;
+    const answer = await deps.llm.ask("revise", system, u, ARTICLE_MAX_TOKENS, draft.candidate_id);
+    problem = null;
+    let edits: Edit[] = [];
+    try {
+      edits = parseEdits(answer);
+    } catch (err) {
+      problem = editIssue([(err as Error).message]);
+    }
+    if (!problem) {
+      const applied = applyEdits({ article: html, meta }, edits);
+      if (applied.failed.length) problem = editIssue(applied.failed);
+      else {
+        next = applied;
+        after = parseArticle(next.article);
+        const drift = setDrift(before, after);
+        if (drift) {
+          problem = setIssue(drift);
+          writeFileSync(join(paths.work, "revise.rejected.html"), next.article);
+        }
+      }
+    }
+    if (!problem) break;
+    writeFileSync(join(paths.work, "revise.rejected.txt"), answer);
   }
-  if (drift) throw new Error(`правка сменила набор файлов или мест вывода: ${drift}`);
+  if (problem) throw new Error(`правка не принята: ${problem.problem}`);
   // Вывод — только настоящий: возвращаем прежние блоки вывода, что бы ни написала модель.
-  writeFileSync(paths.html, `${setOutputs(next.article, outputsOf(html))}\n`);
-  writeFileSync(paths.meta, `${next.meta}\n`);
+  const fixed = setOutputs(next.article, outputsOf(html));
+  writeFileSync(paths.html, fixed.endsWith("\n") ? fixed : `${fixed}\n`);
+  writeFileSync(paths.meta, next.meta.endsWith("\n") ? next.meta : `${next.meta}\n`);
   return [...before.files].some(([n, b]) => after.files.get(n) !== b);
 }
 
