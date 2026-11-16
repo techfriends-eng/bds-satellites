@@ -24,8 +24,7 @@ import { loadStyle } from "./style/rules.ts";
 import { parse } from "yaml";
 import { brandPreviewPrompt } from "./brand/brand.ts";
 import { brandYaml, checkBrand, fetchSiteColors, suggestBrand } from "./brand/homepage.ts";
-import { parseVisuals } from "./visuals/meta.ts";
-import { generatePreview, PreviewFailed } from "./visuals/preview.ts";
+import { generatePreview, parseVisuals, PreviewFailed } from "@techfriends-eng/toolkit/visuals";
 import { dockerCli, finalizePreview, forgetSchemes, renderScheme } from "./visuals/render.ts";
 
 /**
