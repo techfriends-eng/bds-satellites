@@ -105,6 +105,11 @@ SAT_SITE_DIR=../bds-sat-kafka SAT_STATE_DIR=/tmp/sat scripts/sat.mjs collect   #
 `ops/bootstrap-site.sh <site>` (progon, установщик сайта, deploy key, секреты из `~/.config/sat/` через stdin,
 деплой). Мне эти шаги классификатор не даёт: создание пользователей, `sudo` и секреты на хосте.
 
+Модели `claude-cli:` (с v0.1.35) — ещё Claude Code на хосте, общий для сайтов, версия как на wsa100:
+`sudo npm install -g --no-audit --no-fund @anthropic-ai/claude-code@2.1.326` (на progon стоит с 17.11).
+Токен и `DISABLE_AUTOUPDATER=1` — в env каждого сайта (§4): обновляется CLI только этой командой, с новой версией.
+`~/.claude` пишется в дом пользователя сайта, это его каталог состояния.
+
 ## 11. Аварии
 
 | Симптом | Причина | Действие |
