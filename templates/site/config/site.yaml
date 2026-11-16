@@ -27,7 +27,7 @@ llm:
     fix: anthropic/claude-sonnet-5.5
     review: anthropic/claude-sonnet-5.5
     revise: anthropic/claude-sonnet-5.5
-    image: google/gemini-3-pro-image-preview
+    image: google/gemini-2.5-flash-image
   # У Claude 5 работает только effort (handbook gotchas/llm.md#claude5-reasoning).
   reasoning:
     select: { effort: low }
