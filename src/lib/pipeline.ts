@@ -1,3 +1,4 @@
+import { abReport, formatAb } from "./llm/ab.ts";
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readSecret } from "@techfriends-eng/toolkit/config";
@@ -483,6 +484,10 @@ export async function main(argv: string[]): Promise<number> {
   if (process.env.SAT_STAND_BASE) cfg.stand.base = process.env.SAT_STAND_BASE;
   const db = openState(join(stateDir, "state.db"));
   const journal = createJournal(db, cfg, command);
+  if (command === "ab-report") {
+    console.log(formatAb(abReport(db)));
+    return 0;
+  }
   if (command === "note") {
     // Прогон без работы (пропуск обёрткой): запись в журнал хаба, чтобы сторож видел причину.
     const note = createJournal(db, cfg, "note");

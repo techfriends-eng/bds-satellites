@@ -48,6 +48,9 @@ const MIGRATIONS: string[] = [
    );`,
   // Текст статьи из ленты: summary обрезан до 1200 символов, для черновика этого мало.
   "ALTER TABLE candidates ADD COLUMN body TEXT NOT NULL DEFAULT ''",
+  // A/B моделей черновика (ADR 0002 п. 2): вариант темы и вариант вызова.
+  "ALTER TABLE candidates ADD COLUMN variant TEXT",
+  "ALTER TABLE llm_calls ADD COLUMN variant TEXT",
 ];
 
 export type Db = DatabaseSync;

@@ -270,3 +270,51 @@ test("откат: обрезанный ответ не откатывается"
   await assert.rejects(llm.ask("review", "s", "u", 100), Truncated);
   assert.equal(seen.length, 1);
 });
+
+test("A/B: тема держит вариант, темы делятся поровну, общие этапы мимо", async () => {
+  const ab = parseSiteConfig(
+    `site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}
+select: {keywords: [kafka]}
+llm:
+  models: {plan: base, write: base, review: rev}
+  maxCostPerRunUsd: 5
+  ab: {variants: {a: [m-a], b: [m-b, m-b2]}}
+`,
+  );
+  assert.deepEqual(ab.llm.ab?.stages, ["plan", "write", "fix"]);
+  const db = openState(":memory:");
+  for (const id of [1, 2, 3])
+    db.prepare(
+      "INSERT INTO candidates (id, url_hash, url, source_id, kind, title, fetched_at) VALUES (?, ?, 'u', 's', 'news', 't', 'x')",
+    ).run(id, `h${id}`);
+  const { chat, seen } = fakeChat([{}, {}, {}, {}, {}, {}]);
+  const llm = createLlm(db, ab, chat);
+  await llm.ask("plan", "s", "u", 100, 1);
+  await llm.ask("plan", "s", "u", 100, 2);
+  await llm.ask("write", "s", "u", 100, 1);
+  await llm.ask("plan", "s", "u", 100, 3);
+  await llm.ask("review", "s", "u", 100, 1);
+  await llm.ask("plan", "s", "u", 100); // без темы — базовая модель
+  assert.deepEqual(
+    seen.map((r) => r.model),
+    ["m-a", "m-b", "m-a", "m-a", "rev", "base"],
+  );
+  const v = db
+    .prepare("SELECT variant FROM llm_calls ORDER BY id")
+    .all()
+    .map((r) => (r as { variant: string | null }).variant);
+  assert.deepEqual(v, ["a", "b", "a", "a", null, null]);
+});
+
+test("A/B: конфиг с одним вариантом или чужим этапом — ошибка", () => {
+  const head = `site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}
+select: {keywords: [kafka]}
+llm:
+  models: {write: m}
+`;
+  assert.throws(() => parseSiteConfig(head + "  ab: {variants: {a: [x]}}\n"), /два варианта/);
+  assert.throws(
+    () => parseSiteConfig(head + "  ab: {stages: [review], variants: {a: [x], b: [y]}}\n"),
+    /llm.ab.stages: review/,
+  );
+});
