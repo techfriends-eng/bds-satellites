@@ -87,6 +87,7 @@ test("прогон: упал → починка через LLM меняет ко
     spent: () => 0,
     exhausted: () => false,
     charge: () => {},
+    flush: async () => {},
     ask: async (stage, _s, user) => {
       assert.equal(stage, "fix");
       assert.match(user, /boom/);
@@ -120,6 +121,7 @@ test("прогон: починки кончились — run_failed, вывод
     spent: () => 0,
     exhausted: () => false,
     charge: () => {},
+    flush: async () => {},
     ask: async () => '{"cause": "?", "files": {}}',
   };
   const ok = await checkDraft(

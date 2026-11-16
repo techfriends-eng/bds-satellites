@@ -69,6 +69,10 @@ selfcheck, smoke). Откат — прежний тег в `package.json` сай
 - `ops/checks.d/bds-satellites.sh` на auto08: `sat_run:<site>` (нет прогона без ошибки 8/14 суток),
   `sat_stuck` (черновики без прохода проверок > 14 суток), `sat_db`.
 - Хаб: «Спутники» — статьи и прогоны, расход, ошибки.
+- Общий журнал расхода LLM: каждый вызов модели и картинка — строка в `llm.calls` на supan8n (project
+  `bds-satellites`, site, этап, модель ответа, токены, $, ref = id кандидата). DSN `LLM_LEDGER_DB_URL` в env
+  сайта (пишет bds-content `ops/llm_ledger_setup.sh`). Сбой журнала — строка `[llm-ledger]` в логе, прогон идёт.
+  Расход за неделю: `select * from llm.weekly where project = 'bds-satellites' order by week desc;` (pg-mcp).
 
 ## 8. Ежедневное сопровождение
 

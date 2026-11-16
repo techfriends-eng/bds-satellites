@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "no
 import { join } from "node:path";
 import { readSecret } from "@techfriends-eng/toolkit/config";
 import { fetchText } from "@techfriends-eng/toolkit/ingest";
-import { createChat } from "@techfriends-eng/toolkit/llm";
+import { createChat, createLedger } from "@techfriends-eng/toolkit/llm";
 import { createWp } from "@techfriends-eng/toolkit/wp";
 import pg from "pg";
 import { loadSiteConfig, type SiteConfig } from "./config/site.ts";
@@ -317,7 +317,7 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
           finalizePreview(dockerCli, image, d.dir, uid, raw, preview.file, brand.background);
         } catch (err) {
           if (err instanceof PreviewFailed && err.costUsd > 0) {
-            llm.charge("image", ctx.cfg.llm.models.image, err.costUsd, d.candidate_id);
+            llm.charge("image", ctx.cfg.llm.models.image, err.costUsd, d.candidate_id, false);
           }
           ctx.previewFailed.add(d.candidate_id);
           errorOf(ctx, "превью", d.candidate_id, err);
@@ -463,6 +463,11 @@ export async function main(argv: string[]): Promise<number> {
     db,
     cfg,
     createChat({ baseUrl: OPENROUTER, apiKey: optionalSecret("OPENROUTER_API_KEY") ?? "" }),
+    // Общий журнал расхода llm.calls на supan8n; DSN нет — выключен (bds-content ADR 0001, шаг 5c).
+    createLedger({
+      project: "bds-satellites",
+      query: await pgQuery(optionalSecret("LLM_LEDGER_DB_URL")),
+    }),
   );
   const ctx: Ctx = {
     db,
@@ -488,6 +493,7 @@ export async function main(argv: string[]): Promise<number> {
       journal.touch(d.candidate_id);
   }
   const error = await runSteps(steps, (step) => run[step](ctx), command);
+  await llm.flush();
   journal.stats.cost_usd = Math.round(llm.spent() * 1000) / 1000;
   const errs = journal.stats.errors as string[] | undefined;
   await journal.close(
