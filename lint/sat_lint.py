@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-"""Форк: techfriends-eng/bds-wiki-articles@dde5b9b, wiki_lint.py
-Для статей сайтов-спутников (bds-satellites, ADR 0001). Синхронизирован 2026-11-15: перенесены
-content-rules R1, R2 (как у блога, по строке «Главные термины») и R5. Изменения только для wiki
-(потолок 2000 слов, &nbsp; и <strong> заголовка Gutenberg, «Статус» в meta) спутникам не нужны.
+"""Форк: techfriends-eng/bds-content@e7c8170, lint/content_lint.py
+Общий линтер контента BDS с профилями wiki, blog и sat (bds-content ADR 0001, п. 2).
 
-Отличия от исходника — только профиль sat и аргументы --dir/--domain: каталог черновика и домен
-сайта вместо bigdataschool.ru, баннеры cbanner запрещены (CTA — текстовая ссылка на курс), ссылки на
-блог BDS не требуются. Остальные проверки Style Guide V10-Blog — как в исходнике.
+Источник — techfriends-eng/bds-content, lint/content_lint.py. Проекты держат копию с шапкой форка
+(первой строкой docstring) под прежним именем файла: bds-wiki-articles/wiki_lint.py,
+bds-satellites/lint/sat_lint.py. Править копию нельзя, правка идёт здесь (AGENTS.md).
+Проверки R1 (без «:» в SEO), R2 (термины в лиде <strong>) и R5 (Mermaid не вертикальный) — по
+rules/content-rules.md этого репо.
 
-    python3 lint/sat_lint.py <slug> --profile sat --dir <каталог черновика> --domain kafka-school.ru
-
-Исходное описание: машинные проверки Wiki-статьи по чек-листу Этапа 3.5 и B8.
-
-С профилем blog тот же скрипт проверяет статьи блога из blog_articles/ (плагин
-bds-article): объём от 1800 слов, референсы на H2, лид не сверяется с заголовком Gutenberg, обязательны таблица сравнения и баннер
-github_banner. Остальные проверки общие, отдельный линтер не заводим.
+Профили. wiki — Wiki-статья (wiki_articles/, плагин bds-wiki). blog — статья блога (blog_articles/,
+плагин bds-article): объём от 1800 слов, референсы на H2, лид не сверяется с заголовком Gutenberg,
+обязательны таблица сравнения и баннер github_banner. sat — статья сайта-спутника (bds-satellites):
+каталог черновика и домен сайта через --dir и --domain, баннеров нет (CTA — текстовая ссылка на курс),
+ссылки на блог BDS не нужны, строгий стиль (двоеточия, тире, заголовок, «подготовка статьи»).
+Всё, чего нет в профиле, общее.
 
 Скрипт закрывает ту часть проверки, которую можно посчитать, а не оценить на глаз.
 Всё остальное (самодостаточность, каркас разделов, живой язык) остаётся за автором.
@@ -25,6 +24,7 @@ github_banner. Остальные проверки общие, отдельны�
     python3 wiki_lint.py <slug> --published            проверка опубликованной страницы
     python3 wiki_lint.py <slug> --published-file page.txt   то же, но из сохранённой выгрузки
     python3 wiki_lint.py <slug> --profile blog         статья блога из blog_articles
+    python3 sat_lint.py <slug> --profile sat --dir <каталог черновика> --domain kafka-school.ru
 
 Коды возврата: 0 если провалов нет, 1 если есть хотя бы один FAIL.
 """
@@ -46,30 +46,33 @@ ARTICLES = BASE / "wiki_articles"
 PROFILES = {
     "wiki": {
         "dir": "wiki_articles",
-        "words": (1200, 1600),
+        "words": (1200, 1600),      # ориентир: выше потолка предупреждение, не провал
+        "words_hard": 2000,         # жёсткий потолок, выше него провал
         "colon_limit": 3,
         "refs_tag": "h3",
-        "gutenberg_lead": True,
+        "gutenberg_lead": True,     # лид под плагин Encyclopedia: заголовок, курсив, отступ
         "title_max": 56,
         "require_table": False,
         "require_github": False,
-        "meta_status": False,
+        "meta_status": True,       # «Статус: ready» — сигнал wiki_visualizer (bds-content ADR 0001, п. 10)
     },
     "blog": {
         "dir": "blog_articles",
         "words": (1800, None),
+        "words_hard": None,
         "colon_limit": 5,
         "refs_tag": "h2",
         "gutenberg_lead": False,
         "title_max": 60,
         "require_table": True,
         "require_github": True,
-        "meta_status": True,       # «Статус» и «Дата сдачи» нужны для квоты месяца
+        "meta_status": True,       # «Статус» и «Дата сдачи»: квота месяца и сигнал wiki_visualizer
     },
     # Спутники: блог без баннеров и без ссылок на bigdataschool.ru; CTA — ссылка на курс сайта.
     "sat": {
         "dir": ".",
         "words": (1500, 2600),
+        "words_hard": 2600,        # у спутников граница жёсткая, выше неё провал
         "colon_limit": 0,          # строгий стиль спутников, задача 92: служебные двоеточия не в счёт
         "refs_tag": "h2",
         "gutenberg_lead": False,
@@ -79,13 +82,20 @@ PROFILES = {
         "meta_status": False,
         "cbanners": 0,
         "require_blog_link": False,
+        "course_on_domain": True,  # ссылка на курс ведёт на домен сайта (--domain)
         "ban_preparation": True,
         "strict_title": True,      # заголовок поста и SEO Title без двоеточия и тире
         "seo_fields": True,        # Description и Keywords: Yoast и метки WP
         "strict_dash": True,       # тире в виде сущности и короткое тире с пробелами тоже тире
+        "mermaid_fences": True,    # схемы в meta блоками ```mermaid, а не init-блоком wiki_visualizer
+        "brand_colors": False,     # палитру схем задаёт визуал спутника, не init-блок A8
+        "scheme_files": True,      # <slug>_schemeN.jpg рядом со статьёй — не лишний файл
+        "style_gate": True,        # в --json список style_failed: такая статья не уходит в WP
     },
 }
-# Провалы стиля: такая статья не уходит в WP даже черновиком (src/lib/publish/wp.ts).
+PROFILE = PROFILES["wiki"]
+
+# Провалы стиля профиля sat: такая статья не уходит в WP даже черновиком (bds-satellites src/lib/publish/wp.ts).
 STYLE_ITEMS = {
     "Двоеточия в заголовках", "Двоеточия в теле статьи", "Заголовок статьи без двоеточия и тире",
     "SEO Title без двоеточия и тире", "Длинное тире", "Подготовка статьи в тексте", "Тег code",
@@ -94,8 +104,7 @@ STYLE_ITEMS = {
 }
 STRICT_DASH = re.compile(r"—|&mdash;|&#8212;|&#x2014;|\s–\s", flags=re.I)
 TITLE_BAN = re.compile(r"[:—–]|&mdash;|&#8212;|&#x2014;", flags=re.I)
-DOMAIN = "bigdataschool.ru"  # --domain у профиля sat
-PROFILE = PROFILES["wiki"]
+DOMAIN = "bigdataschool.ru"  # домен внутренних ссылок; у профиля sat — --domain
 
 
 def set_profile(name: str, directory: str | None = None, domain: str | None = None) -> None:
@@ -213,8 +222,14 @@ def check_structure(html: str, report: Report) -> None:
                  f"{len(hits)} при лимите {limit}",
                  f"{len(hits)} при лимите {limit}, лишние: {hits[limit:]}")
 
-    lead = re.search(r"^\s*<p>", html)
-    report.check(bool(lead), "Статья начинается с лид-абзаца", "да", "первый блок не <p>")
+    if PROFILE["gutenberg_lead"]:
+        # Wiki: первая строка "&nbsp;" отделяет лид от заголовка записи, дальше сразу лид.
+        lead = re.match(r"\s*&nbsp;[ \t]*\n\s*<p>", html)
+        report.check(bool(lead), "Отступ &nbsp; и лид-абзац в начале статьи", "да",
+                     "первая строка должна быть &nbsp;, вторая блок <p> с лидом")
+    else:
+        lead = re.search(r"^\s*<p>", html)
+        report.check(bool(lead), "Статья начинается с лид-абзаца", "да", "первый блок не <p>")
 
     wrapped = wrapped_lines(html)
     report.check(not wrapped, "Блок одной строкой (без мягких переносов)",
@@ -232,7 +247,7 @@ def check_structure(html: str, report: Report) -> None:
 def check_banners(html: str, report: Report) -> None:
     codes = re.findall(r"\[cbanner code=([A-Z0-9]+)\]", html)
     if PROFILE.get("cbanners", 2) == 0:
-        # На сайтах-спутниках шорткода баннера нет (решение автора, ADR 0001): CTA — ссылкой.
+        # На сайтах-спутниках шорткода баннера нет (решение автора, bds-satellites ADR 0001): CTA — ссылкой.
         report.check(not codes, "Баннеры cbanner отсутствуют", "нет", f"найдено {codes}, на спутнике шорткода нет")
         report.check("[github_banner" not in html, "Баннер github_banner отсутствует", "нет", "найден")
         return
@@ -275,7 +290,7 @@ def mermaid_marks(html: str) -> list[str]:
             if re.search(pattern, blocks, flags=re.M | re.I)]
 
 
-# Читателю не рассказываем о подготовке статьи (style/sat-delta.md). Вывод стенда в <pre> не проверяем.
+# Читателю не рассказываем о подготовке статьи (bds-satellites style/sat-delta.md). Вывод стенда в <pre> не проверяем.
 PREPARATION = re.compile(
     r"(?:не\s+(?:смогли|удалось|получилось|вышло)\s+(?:\w+\s+)?(?:прочитать|открыть|получить|скачать|"
     r"загрузить|изучить|просмотреть|проверить)"
@@ -333,7 +348,9 @@ def check_links(html: str, report: Report) -> None:
 
     if PROFILE.get("require_blog_link", True):
         report.check(any("/blog/" in u for u in urls), "Ссылка на статью блога (A7)", "есть", "не найдена")
-    report.check(any(DOMAIN in u and "/courses/" in u for u in urls), "Текстовая ссылка на курс (A7)", "есть", "не найдена")
+    on_domain = PROFILE.get("course_on_domain", False)
+    report.check(any("/courses/" in u and (not on_domain or DOMAIN in u) for u in urls),
+                 "Текстовая ссылка на курс (A7)", "есть", "не найдена")
 
     # Прямых ссылок на Wiki нет в обоих профилях: термины подсвечивает плагин Encyclopedia.
     wiki_links = [u for u in internal if "/wiki/" in u]
@@ -384,11 +401,24 @@ def check_lead_and_seo(html: str, meta: str, report: Report) -> None:
                    "строки нет, лид сверять не с чем")
     else:
         title = found.group(1).strip().strip("`")
-        lead = re.match(r"\s*<p>(.*?)</p>", html, flags=re.S)
-        opening = re.sub(r"<[^>]+>", "", lead.group(1)).strip() if lead else ""
+        term = re.search(r"\*\*Термин:\*\*\s*(.+)", meta)
+        term = term.group(1).strip().strip("`") if term else ""
+        # Плагин Encyclopedia подсвечивает термин по заголовку записи, «X: что это» его ломает.
+        report.check(":" not in title and (not term or title.lower() == term.lower()),
+                     "Заголовок Gutenberg это только термин", f"{title!r}",
+                     f"{title!r}: без двоеточия и добавок, равен строке «Термин» {term!r}")
+        lead = re.match(r"\s*(?:&nbsp;\s*)?<p>(.*?)</p>", html, flags=re.S)
+        raw = lead.group(1) if lead else ""
+        opening = re.sub(r"<[^>]+>", "", raw).strip()
         report.check(opening.startswith(title), "Лид открывается заголовком Gutenberg",
                      f"{title!r}",
                      f"ожидалось начало {title!r}, найдено {opening[:len(title) + 20]!r}")
+        # content-rules R2: термин в лиде <strong>, курсив отменён автором 2026-11-15.
+        strongs = re.findall(r"<strong>(.*?)</strong>", raw)
+        report.check(raw.startswith(f"<strong>{title}</strong>") and len(strongs) == 1 and "<em>" not in raw,
+                     "R2 термин в лиде жирным один раз", f"<strong>{title}</strong>",
+                     f"лид должен открываться <strong>{title}</strong>, других <strong> и <em> в лиде нет; "
+                     f"найдено <strong> {len(strongs)}: {strongs[:3]}")
 
     if PROFILE.get("strict_title"):
         post = re.search(r"^-\s*\*\*Заголовок статьи:\*\*\s*(.+)$", meta, flags=re.M)
@@ -409,7 +439,7 @@ def check_lead_and_seo(html: str, meta: str, report: Report) -> None:
         if PROFILE.get("strict_title"):
             report.check(not TITLE_BAN.search(value), "SEO Title без двоеточия и тире", "да", repr(value))
 
-    # Description и Keywords уходят в Yoast и метки WP (src/lib/publish/wp.ts, ToDo 99).
+    # Description и Keywords уходят в Yoast и метки WP (bds-satellites src/lib/publish/wp.ts).
     if PROFILE.get("seo_fields"):
         desc = re.search(r"^-\s*\*\*Description:\*\*\s*(.+)$", meta, flags=re.M)
         value = desc.group(1).strip() if desc else ""
@@ -422,13 +452,14 @@ def check_lead_and_seo(html: str, meta: str, report: Report) -> None:
                      "строки нет или она пустая")
 
     # content-rules R1: в SEO Title и Description нет «:» с пробелом или концом строки после него.
-    desc_r1 = re.search(r"^-\s*\*\*Description:\*\*\s*(.+)$", meta, flags=re.M)
-    seo_fields = [m.group(1).strip() for m in (seo, desc_r1) if m]
+    desc = re.search(r"^-\s*\*\*Description:\*\*\s*(.+)$", meta, flags=re.M)
+    seo_fields = [m.group(1).strip() for m in (seo, desc) if m]
     colon = [f for f in seo_fields if re.search(r":(?=\s|$)", f)]
     report.check(not colon, "R1 без двоеточия в SEO Title и Description", "нет",
                  f"двоеточие: {colon[0][:60]!r}" if colon else "")
 
-    # content-rules R2: «Главные термины» из meta выделены в лиде <strong> один раз, другого жирного нет.
+    # content-rules R2 для блога и спутников: «Главные термины» из meta выделены в лиде <strong> один
+    # раз, другого жирного в лиде нет. У wiki главный термин один — заголовок Gutenberg, проверка выше.
     if not PROFILE["gutenberg_lead"]:
         terms_line = re.search(r"^-\s*\*\*Главные термины:\*\*\s*(.+)$", meta, flags=re.M)
         if not terms_line:
@@ -449,7 +480,7 @@ def check_lead_and_seo(html: str, meta: str, report: Report) -> None:
         done = re.search(r"^-\s*\*\*Дата сдачи:\*\*\s*(.+)$", meta, flags=re.M)
         report.check(bool(status and done), "Строки «Статус» и «Дата сдачи» в метаданных",
                      f"{status.group(1).strip() if status else ''}",
-                     "нет строки, квота месяца не посчитается")
+                     "нет строки: wiki_visualizer не возьмёт статью в работу, у блога не посчитается квота")
 
 
 def check_images(html: str, meta: str, report: Report) -> None:
@@ -475,14 +506,19 @@ def check_images(html: str, meta: str, report: Report) -> None:
                      f"{len(files)} картинок, все есть в meta", f"нет описания: {orphans}")
 
         schemes = len(re.findall(r"^### Схема", meta, flags=re.M))
-        mermaid_blocks = len(re.findall(r"^```mermaid\s*$", meta, flags=re.M))
+        mermaid_blocks = (len(re.findall(r"^```mermaid\s*$", meta, flags=re.M)) if PROFILE.get("mermaid_fences")
+                          else len(re.findall(r"%%\{init:", meta)))
         report.check(schemes == mermaid_blocks and mermaid_blocks > 0, "Код Mermaid у каждой схемы",
                      f"{schemes} схем, {mermaid_blocks} блоков Mermaid",
                      f"{schemes} схем против {mermaid_blocks} блоков Mermaid")
-        # content-rules R5: схема читается слева направо, TB/TD/BT — провал.
+        # content-rules R5: схема читается слева направо. TB/TD/BT у graph/flowchart и у direction
+        # в subgraph — провал (вертикальный PNG на сайте нечитаем на телефоне).
         vertical = re.findall(r"^\s*(?:graph|flowchart|direction)\s+(TB|TD|BT)\b", meta, flags=re.M)
         report.check(not vertical, "R5 Mermaid не вертикальный", "LR/RL",
                      f"направлений сверху вниз: {len(vertical)}, нужно LR")
+        if PROFILE.get("brand_colors", True):
+            colors = all(c in meta for c in ("#294A70", "#FFAB1F", "#F5F7FA"))
+            report.check(colors, "Фирменные цвета в схемах", "есть", "init-блок без палитры A8")
 
 
 def check_code_blocks(html: str, report: Report) -> None:
@@ -584,8 +620,8 @@ def check_names(slug: str, report: Report) -> None:
         if stem == slug:
             continue
         suffix = stem[len(slug):]
-        # Схемы <slug>_schemeN.jpg рендерятся после первой проверки, доводка их уже видит.
-        if suffix not in ALLOWED_SUFFIXES and not re.fullmatch(r"_scheme\d+", suffix):
+        # Схемы <slug>_schemeN.jpg у спутников рендерятся после первой проверки, доводка их уже видит.
+        if suffix not in ALLOWED_SUFFIXES and not (PROFILE.get("scheme_files") and re.fullmatch(r"_scheme\d+", suffix)):
             bad.append(name)
     report.check(not bad, "Суффиксы файлов из разрешённого списка", f"{found}", f"лишние: {bad}")
     report.check((ARTICLES / f"{slug}_meta.md").exists(), "Файл метаданных на месте",
@@ -604,8 +640,21 @@ def stats(html: str, key: str, report: Report) -> dict:
     share = round(len(long_ones) / len(counted) * 100) if counted else 0
 
     low, high = PROFILE["words"]
+    hard = PROFILE.get("words_hard")
+    n = len(words)
     label = f"Объём {low}-{high} слов" if high else f"Объём от {low} слов"
-    report.check(low <= len(words) <= (high or len(words)), label, f"{len(words)}", f"{len(words)}")
+    # Верхняя граница ориентир, а не правило. Провал за 1663 слова заставлял резать
+    # содержательный текст ради цифры (data_mart, 2026-11-03). Теперь выше ориентира
+    # предупреждение: сверх нормы должно быть содержание, это оценивает смысловая
+    # проверка. Провал только ниже нижней границы и выше жёсткого потолка.
+    if n < low or (hard and n > hard):
+        limit = f"меньше {low}" if n < low else f"больше жёсткого потолка {hard}"
+        report.check(False, label, "", f"{n}, {limit}")
+    elif high and n > high:
+        report.add("warn", label, f"{n}, выше ориентира на {n - high}: не резать ради цифры, "
+                   "смысловая проверка смотрит, что сверх нормы не вода")
+    else:
+        report.check(True, label, f"{n}")
     # Долю длинных предложений линтер считает, но проверкой не делает: см. B4 п.3.
     # Предупреждение по ней провоцировало разбавление текста короткими фразами ради
     # процента, а это худший дефект, чем сама длина. Число остаётся в статистике и
@@ -672,8 +721,9 @@ def lint(slug: str, key: str | None, as_json: bool = False,
             "fails": report.failed,
             "warns": report.warned,
             "failed_items": [name for status, name, _ in report.rows if status == "FAIL"],
-            "style_failed": [f"{name}: {comment}"[:600] for status, name, comment in report.rows
-                             if status == "FAIL" and name in STYLE_ITEMS],
+            **({"style_failed": [f"{name}: {comment}"[:600] for status, name, comment in report.rows
+                                 if status == "FAIL" and name in STYLE_ITEMS]}
+               if PROFILE.get("style_gate") else {}),
             **numbers,
         }
         print(json.dumps(payload, ensure_ascii=False))
@@ -698,12 +748,13 @@ def lint(slug: str, key: str | None, as_json: bool = False,
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Машинные проверки Wiki-статьи")
+    parser = argparse.ArgumentParser(description="Машинные проверки статьи BDS: wiki, blog, sat")
     parser.add_argument("slug", nargs="?", help="slug статьи, файлы берутся из каталога профиля")
     parser.add_argument("--profile", choices=sorted(PROFILES), default="wiki",
-                        help="wiki (wiki_articles), blog (blog_articles) или sat (спутники, с --dir и --domain)")
-    parser.add_argument("--dir", help="каталог со статьёй и метаданными (профиль sat)")
-    parser.add_argument("--domain", help="домен сайта для внутренних ссылок (профиль sat)")
+                        help="wiki (по умолчанию, wiki_articles), blog (blog_articles, плагин bds-article) "
+                             "или sat (спутники, с --dir и --domain)")
+    parser.add_argument("--dir", help="каталог со статьёй и метаданными вместо каталога профиля (для sat обязателен)")
+    parser.add_argument("--domain", help="домен сайта для внутренних ссылок (профиль sat, обязателен)")
     parser.add_argument("--key", help="главное ключевое слово, по умолчанию берётся из метаданных")
     parser.add_argument("--all", action="store_true", help="прогнать по всем статьям каталога")
     parser.add_argument("--json", action="store_true",
