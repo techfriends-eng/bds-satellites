@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+## [0.1.29] — 2026-11-16
+
+### Изменено
+- Общие правила R1–R6 из одного источника (bds-content ADR 0001, п. 1): копия `style/content-rules.md`
+  (bds-content@e7c8170) идёт в промпты plan, write и revise блоком «ОБЩИЕ ПРАВИЛА R1–R6». Пересказ R2/R3 в
+  `style/sat-delta.md` заменён ссылкой на код правила.
+- `style/upstream/article-plan.rules.md` и `article-write.rules.md` — новые копии bds-prompts@1c5c9eb (bds-article
+  1.0.9: правила R1–R6 там тоже ссылкой). Путь к файлу правил плагина `loadStyle` заменяет на «общие правила
+  R1–R6 в блоке выше».
+
 ## [0.1.28] — 2026-11-16
 
 ### Изменено

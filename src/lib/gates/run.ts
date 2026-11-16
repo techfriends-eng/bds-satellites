@@ -155,6 +155,7 @@ export async function reviseOnce(
     article: html,
     meta_md: meta,
     style_guide: deps.style.styleGuide,
+    content_rules: deps.style.contentRules,
     sat_delta: deps.style.satDelta,
   });
   const before = parseArticle(html);

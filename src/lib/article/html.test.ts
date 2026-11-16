@@ -68,6 +68,17 @@ test("правила: из форка берутся Style Guide и B5, дель
   assert.match(style.satDelta, /Баннеров `\[cbanner\]`/);
 });
 
+test("правила: общие R1–R6 из копии bds-content, без шапки форка и путей плагина", () => {
+  const style = loadStyle(join(import.meta.dirname, "..", "..", "..", "style"));
+  assert.match(style.contentRules, /^# Общие правила контента BDS/);
+  for (const code of ["R1", "R2", "R3", "R4", "R5", "R6"]) {
+    assert.match(style.contentRules, new RegExp(`^## ${code}\\. `, "m"), code);
+  }
+  assert.ok(!style.contentRules.includes("<!--"));
+  assert.ok(!style.styleGuide.includes("CLAUDE_PLUGIN_ROOT"));
+  assert.match(style.styleGuide, /общие правила R1–R6 в блоке выше/);
+});
+
 test("разбор: у run.sh с shebang имя во второй строке, починка находит тот же блок", () => {
   const html = `<pre class="EnlighterJSRAW" data-enlighter-language="bash">#!/usr/bin/env bash
 # run.sh · Spark 4.0.4
