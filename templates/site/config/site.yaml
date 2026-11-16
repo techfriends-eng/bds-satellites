@@ -20,6 +20,8 @@ select:
   maxFetches: 4
 
 llm:
+  # Модель — строкой или списком с откатом по порядку: openrouter:<id> (или просто id), claude-cli:<alias>
+  # (подписка Claude, RUNBOOK пакета §4), например review: [claude-cli:sonnet, anthropic/claude-sonnet-5.5].
   models:
     select: anthropic/claude-haiku-5.5
     plan: anthropic/claude-sonnet-5.5

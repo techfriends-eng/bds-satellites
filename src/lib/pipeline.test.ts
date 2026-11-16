@@ -47,12 +47,14 @@ test("другая ошибка останавливает прогон", async 
 });
 
 test("превью: откат — вторая модель пары, без повтора основной", () => {
-  assert.deepEqual(imageModels("google/gemini-2.5-flash-image"), [
+  assert.deepEqual(imageModels(["google/gemini-2.5-flash-image"]), [
     "google/gemini-2.5-flash-image",
     "google/gemini-3-pro-image-preview",
   ]);
-  assert.deepEqual(imageModels("google/gemini-3-pro-image-preview"), [
+  assert.deepEqual(imageModels(["google/gemini-3-pro-image-preview"]), [
     "google/gemini-3-pro-image-preview",
     "google/gemini-2.5-flash-image",
   ]);
+  // Список в конфиге — как есть, без пары; префикс openrouter: снимается
+  assert.deepEqual(imageModels(["openrouter:a/img", "b/img"]), ["a/img", "b/img"]);
 });
