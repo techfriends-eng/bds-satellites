@@ -9,6 +9,7 @@ import {
   setFile,
   setOutputs,
   solutionButtons,
+  tableLayout,
   splitAnswer,
 } from "./html.ts";
 
@@ -106,4 +107,35 @@ test("кнопка решения: любой summary со словом «Реш
   assert.equal(out.split(`<summary>${SOLUTION_SUMMARY}</summary>`).length - 1, 2);
   assert.ok(out.includes("<summary>Подсказка</summary>"));
   assert.equal(solutionButtons(out), out);
+});
+
+test("tableLayout: ширина по тексту, влево, перенос длинных имён (ToDo 104)", () => {
+  const html = [
+    "<p>До.</p>",
+    "<table><thead><tr><th>Стратегия</th><th>Когда применяется</th><th>Параметр</th></tr></thead><tbody>",
+    "<tr><td>BroadcastHashJoin</td><td>Одна сторона мала и может быть build side, оценка размера верна</td><td>spark.sql.autoBroadcastJoinThreshold</td></tr>",
+    '<tr><td>SortMergeJoin</td><td>Обе стороны велики, <a href="https://spark.apache.org/docs/x.y">вариант</a> по умолчанию</td><td>нет</td></tr>',
+    "</tbody></table>",
+  ].join("\n");
+  const out = tableLayout(html);
+  assert.ok(out.includes("<table><thead>"), "тег table без атрибутов: по нему ищет линтер");
+  const widths = [...out.matchAll(/<th style="width:(\d+)%;text-align:left">/g)].map((m) =>
+    Number(m[1]),
+  );
+  assert.equal(widths.length, 3);
+  assert.equal(
+    widths.reduce((a, b) => a + b, 0),
+    100,
+  );
+  assert.ok(widths[1] > widths[0] && widths[1] > widths[2], `текстовая колонка шире: ${widths}`);
+  assert.equal(out.match(/<td style="text-align:left">/g)?.length, 6);
+  assert.ok(out.includes("spark.<wbr>sql.<wbr>auto<wbr>Broadcast<wbr>Join<wbr>Threshold"));
+  assert.ok(out.includes('href="https://spark.apache.org/docs/x.y"'), "атрибуты ссылок не трогаем");
+  assert.ok(
+    out.includes(">Broadcast<wbr>Hash<wbr>Join</td>"),
+    "длинное CamelCase-имя рвётся по словам",
+  );
+  assert.ok(out.includes(">SortMergeJoin</td>"), "короче LONG_WORD не рвём");
+  assert.equal(tableLayout(out), out);
+  assert.equal(tableLayout("<p>нет таблиц</p>"), "<p>нет таблиц</p>");
 });
