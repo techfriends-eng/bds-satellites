@@ -93,6 +93,9 @@ selfcheck, smoke). Откат — прежний тег в `package.json` сай
 `STYLE_ITEMS` линтера) в WP не уходит совсем, и уже созданный пост не обновляется: смотреть
 `stats.style_blocked` в журнале хаба.
 
+Переделка старого поста (`sat adopt`, с v0.1.41): кандидат идёт обычными тактами, публикация обновляет
+этот пост. Опубликованный пост меняет только версия без провала проверок; пока провал — `stats.live_held`.
+
 A/B моделей черновика (секция `llm.ab` в `site.yaml`, ADR 0002 §2): раз в неделю `sat ab-report` на каждом
 сайте. Темы делятся поровну, вариант темы не меняется. Откат на запасную модель виден в `llm_calls.model`.
 
@@ -152,6 +155,7 @@ npm run gate                                  # гейт
 ops/new-site.sh python python-school.ru fri ../bds-sat-python   # тонкий репо нового сайта
 scripts/sat.mjs gates 13                      # шаг по одному кандидату (id из state.db)
 scripts/sat.mjs sync                          # переписать журнал хаба по всем черновикам
+scripts/sat.mjs adopt 9183 https://… Заголовок  # старый пост WP переделать по новым правилам (ToDo 97)
 scripts/sat.mjs ab-report                     # итог A/B моделей черновика по вариантам
 scripts/sat.mjs brand-check                   # brand против цветов главной сайта
 scripts/sat.mjs brand-suggest --domain x.ru   # предложение палитры нового сайта
