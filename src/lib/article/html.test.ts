@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadStyle } from "../style/rules.ts";
-import { clip, parseArticle, setFile, setOutputs, splitAnswer } from "./html.ts";
+import {
+  clip,
+  parseArticle,
+  SOLUTION_SUMMARY,
+  setFile,
+  setOutputs,
+  solutionButtons,
+  splitAnswer,
+} from "./html.ts";
 
 const HTML = [
   "<p>Лид.</p>",
@@ -86,4 +94,16 @@ docker compose up -d</pre>`;
   const { files } = parseArticle(html);
   assert.deepEqual([...files.keys()], ["run.sh"]);
   assert.match(setFile(html, "run.sh", "#!/usr/bin/env bash\n# run.sh\necho ok"), /echo ok/);
+});
+
+test("кнопка решения: любой summary со словом «Решение» приводится к образцу, другие не трогаем", () => {
+  const html = [
+    "<details><summary>Решение</summary><p>a</p></details>",
+    '<details><summary class="x"><em>Решение задания 2</em></summary><p>b</p></details>',
+    "<details><summary>Подсказка</summary><p>c</p></details>",
+  ].join("\n");
+  const out = solutionButtons(html);
+  assert.equal(out.split(`<summary>${SOLUTION_SUMMARY}</summary>`).length - 1, 2);
+  assert.ok(out.includes("<summary>Подсказка</summary>"));
+  assert.equal(solutionButtons(out), out);
 });

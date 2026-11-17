@@ -12,6 +12,19 @@ const FILLED =
   /<!-- output ([\w./-]+) -->\n<pre class="EnlighterJSRAW" data-enlighter-language="generic">[\s\S]*?<\/pre>/g;
 const FILE_COMMENT = /^\s*(?:#|--|\/\/|<!--)\s*([\w./-]+\.[\w]+|Dockerfile|Makefile)(?=\s|·|$)/;
 export const MAX_OUTPUT_LINES = 80;
+/**
+ * Кнопка решения задания (sat-delta п. 5). Тема сайтов ставит summary{display:block} и прячет маркер
+ * раскрытия, поэтому значок и подсказка — в самом тексте (ToDo 102, вид выбран автором 17.11).
+ * Тот же образец проверяет линтер (профиль sat, solution_summary).
+ */
+export const SOLUTION_SUMMARY = "<strong>▶ Решение</strong> (нажмите, чтобы открыть)";
+
+/** Любой `<summary>` со словом «Решение» приводится к образцу. Другие `<summary>` не трогаем. */
+export function solutionButtons(html: string): string {
+  return html.replace(/<summary\b[^>]*>([\s\S]*?)<\/summary>/g, (m, inner: string) =>
+    /решение/i.test(inner.replace(/<[^>]+>/g, "")) ? `<summary>${SOLUTION_SUMMARY}</summary>` : m,
+  );
+}
 
 export function unescapeHtml(s: string): string {
   return s
