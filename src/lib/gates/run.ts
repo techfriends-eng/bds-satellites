@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { applyEdits, parseEdits, type Edit } from "../article/edits.ts";
@@ -229,6 +230,82 @@ export async function reviseOnce(
   return [...before.files].some(([n, b]) => after.files.get(n) !== b);
 }
 
+/** Отпечаток прогона стенда: align.json действителен только для того прогона, после которого сделан. */
+function runHash(dir: string): string {
+  const p = join(dir, ".work", "run.json");
+  return existsSync(p)
+    ? createHash("sha256").update(readFileSync(p)).digest("hex").slice(0, 16)
+    : "";
+}
+
+/** Сверка сделана после последнего прогона стенда (ADR 0003). Новый прогон — сверка заново. */
+export function aligned(dir: string): boolean {
+  const p = join(dir, ".work", "align.json");
+  if (!existsSync(p)) return false;
+  const run = runHash(dir);
+  return run !== "" && (JSON.parse(readFileSync(p, "utf8")) as { run?: string }).run === run;
+}
+
+export type AlignResult = { run: string; ok: boolean; edits: number; detail: string };
+
+/**
+ * Сверка текста с реальным выводом (ADR 0003): один вызов LLM после удачного стенда, пары замен как у
+ * правки. Код и вывод заморожены: правка, что трогает файлы кода или места вывода, не применяется,
+ * статья идёт в проверки как есть. Итог — `.work/align.json` с отпечатком прогона.
+ */
+export async function align(deps: GateDeps, draft: Draft, slug: string): Promise<AlignResult> {
+  const paths = draftPaths(draft.dir, slug);
+  const html = readFileSync(paths.html, "utf8");
+  const meta = readFileSync(paths.meta, "utf8");
+  const save = (r: Omit<AlignResult, "run">): AlignResult => {
+    const res = { run: runHash(draft.dir), ...r };
+    writeFileSync(join(paths.work, "align.json"), JSON.stringify(res, null, 1));
+    return res;
+  };
+  const before = parseArticle(html);
+  if (!before.outputs.length) return save({ ok: true, edits: 0, detail: "мест вывода нет" });
+  const { system, user } = render(deps.promptDirs, "align", deps.cfg, {
+    docs: research(draft.dir).docs || "(нет)",
+    article: html,
+    meta_md: meta,
+    style_guide: deps.style.styleGuide,
+    content_rules: deps.style.contentRules,
+    sat_delta: deps.style.satDelta,
+  });
+  const answer = await deps.llm.ask("align", system, user, ARTICLE_MAX_TOKENS, draft.candidate_id);
+  if (!/=====FIND (ARTICLE|META)=====/.test(answer)) {
+    return save({ ok: true, edits: 0, detail: "текст уже совпадает с выводом" });
+  }
+  const reject = (detail: string) => {
+    writeFileSync(join(paths.work, "align.rejected.txt"), answer);
+    return save({ ok: false, edits: 0, detail });
+  };
+  let edits: Edit[];
+  try {
+    edits = parseEdits(answer);
+  } catch (err) {
+    return reject((err as Error).message);
+  }
+  const applied = applyEdits({ article: html, meta }, edits);
+  if (applied.failed.length) return reject(`пары не применились: ${applied.failed.join("; ")}`);
+  const after = parseArticle(applied.article);
+  const drift = setDrift(before, after);
+  if (drift) return reject(drift);
+  const code = [...before.files].filter(([n, b]) => after.files.get(n) !== b).map(([n]) => n);
+  if (code.length) return reject(`правка меняет код ${code.join(", ")}`);
+  const fixed = setOutputs(applied.article, outputsOf(html));
+  writeFileSync(paths.html, fixed.endsWith("\n") ? fixed : `${fixed}\n`);
+  writeFileSync(paths.meta, applied.meta.endsWith("\n") ? applied.meta : `${applied.meta}\n`);
+  return save({ ok: true, edits: edits.length, detail: `пар ${edits.length}` });
+}
+
+/** Стенд и, если он прошёл, сверка текста с выводом. true — стенд прошёл. */
+async function standAligned(deps: GateDeps, draft: Draft, slug: string): Promise<boolean> {
+  if (!(await checkDraft(deps, draft, slug))) return false;
+  await align(deps, draft, slug);
+  return true;
+}
+
 function standOk(dir: string): boolean {
   const p = join(dir, ".work", "run.json");
   return existsSync(p) && (JSON.parse(readFileSync(p, "utf8")) as { ok?: boolean }).ok === true;
@@ -250,7 +327,7 @@ function revisionsDone(deps: GateDeps, id: number): number {
 export async function finish(deps: GateDeps, draft: Draft, slug: string): Promise<boolean> {
   // Код не прошёл стенд в прошлый раз: стенд могли починить с тех пор, а правка текста его не перезапустит.
   if (!standOk(draft.dir)) {
-    if (!(await checkDraft(deps, draft, slug))) return false;
+    if (!(await standAligned(deps, draft, slug))) return false;
     if ((await gate(deps, draft, slug)).ok) return true;
   }
   for (
@@ -260,7 +337,7 @@ export async function finish(deps: GateDeps, draft: Draft, slug: string): Promis
     i++
   ) {
     if (await reviseOnce(deps, draft, slug)) {
-      if (!(await checkDraft(deps, draft, slug))) return false;
+      if (!(await standAligned(deps, draft, slug))) return false;
     }
     if ((await gate(deps, draft, slug)).ok) return true;
   }
@@ -284,11 +361,12 @@ export const REWORK_ISSUE: Issue = {
  */
 export async function rework(deps: GateDeps, draft: Draft, slug: string): Promise<boolean> {
   // Стенд мог не пройти раньше из-за самого стенда. Новый провал не отменяет правку текста.
-  if (!standOk(draft.dir)) await checkDraft(deps, draft, slug);
+  if (!standOk(draft.dir)) await standAligned(deps, draft, slug);
+  else if (!aligned(draft.dir)) await align(deps, draft, slug);
   await gate(deps, draft, slug); // gates.json мог устареть с прошлого релиза, правке нужны свежие провалы
   for (let i = 0; i < deps.cfg.gates.maxRevisions; i++) {
     if (await reviseOnce(deps, draft, slug, i === 0 ? [REWORK_ISSUE] : [])) {
-      if (!(await checkDraft(deps, draft, slug))) return false;
+      if (!(await standAligned(deps, draft, slug))) return false;
     }
     if ((await gate(deps, draft, slug)).ok) return true;
   }

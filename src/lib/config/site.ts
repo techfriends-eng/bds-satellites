@@ -42,7 +42,10 @@ export type SiteConfig = {
   };
   llm: {
     /** Список моделей этапа с откатом по порядку (ADR 0002); в YAML можно строкой — список из одной. */
-    models: Record<"select" | "plan" | "write" | "fix" | "review" | "revise" | "image", string[]>;
+    models: Record<
+      "select" | "plan" | "write" | "fix" | "review" | "revise" | "align" | "image",
+      string[]
+    >;
     reasoning: Partial<Record<string, Record<string, unknown>>>;
     maxCostPerRunUsd: number;
     /** Потолок недели сайта для тактов (ADR 0002 §3); по умолчанию равен потолку прогона. */
@@ -137,9 +140,13 @@ function parseLlm(raw: Raw): SiteConfig["llm"] {
     }
     models[stage] = list;
   }
+  // align (ADR 0003) без своей строки в конфиге идёт той же парой моделей и тем же effort, что revise.
+  if (!models.align && models.revise) models.align = models.revise;
+  const reasoning: Partial<Record<string, Record<string, unknown>>> = { ...llm.reasoning };
+  if (!reasoning.align && reasoning.revise) reasoning.align = reasoning.revise;
   return {
     models: models as SiteConfig["llm"]["models"],
-    reasoning: llm.reasoning,
+    reasoning,
     maxCostPerRunUsd: llm.maxCostPerRunUsd,
     maxCostPerWeekUsd: Number(llm.maxCostPerWeekUsd ?? llm.maxCostPerRunUsd),
     claudeCli: { ...CLI_DEFAULTS, ...llm.claudeCli },

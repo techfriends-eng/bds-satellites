@@ -10,7 +10,7 @@ import { loadSiteConfig, type SiteConfig } from "./config/site.ts";
 import { markBds, syncBds } from "./dedup/bds.ts";
 import { markRadar, TAKEN_SQL } from "./dedup/radar.ts";
 import { lint } from "./gates/checks.ts";
-import { finish, gate, rework, slugOf, type GateDeps } from "./gates/run.ts";
+import { align, aligned, finish, gate, rework, slugOf, type GateDeps } from "./gates/run.ts";
 import { refreshSource, writeDraft, type Candidate } from "./generate/draft.ts";
 import { createJournal, type Journal, type Query } from "./journal/journal.ts";
 import { createClaudeCli } from "./llm/claude-cli.ts";
@@ -53,6 +53,7 @@ export const STEPS = [
   "select",
   "draft",
   "stand",
+  "align",
   "gates",
   "revise",
   "visuals",
@@ -74,7 +75,7 @@ type AnyStep = Step | DraftCommand;
 export const RUN_STEPS: Step[] = ["visuals", ...STEPS];
 /**
  * Такт (ADR 0002 §3): таймер сайта срабатывает несколько раз в сутки, за такт у темы не больше одного
- * шага из draft, stand, gates, revise. Превью, схемы и публикация готового идут в том же такте.
+ * шага из draft, stand, align, gates, revise. Превью, схемы и публикация готового идут в том же такте.
  * Новые темы (collect, select) — первым тактом недели сайта.
  */
 export function tickSteps(newTopics: boolean): Step[] {
@@ -145,7 +146,7 @@ async function pgQuery(url: string | null): Promise<Query | null> {
 function drafts(db: Db, statuses: string[], ids?: number[]) {
   const rows = db
     .prepare(
-      `SELECT d.* FROM drafts d JOIN candidates c ON c.id = d.candidate_id
+      `SELECT d.*, c.status FROM drafts d JOIN candidates c ON c.id = d.candidate_id
        WHERE c.status IN (${statuses.map(() => "?").join(",")}) ORDER BY d.id`,
     )
     .all(...statuses) as {
@@ -153,6 +154,7 @@ function drafts(db: Db, statuses: string[], ids?: number[]) {
     candidate_id: number;
     dir: string;
     wp_post_id: number | null;
+    status: string;
   }[];
   return ids?.length ? rows.filter((r) => ids.includes(r.candidate_id)) : rows;
 }
@@ -292,8 +294,21 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
       }
     }
   },
+  async align(ctx) {
+    for (const d of drafts(ctx.db, ["ran"], ctx.ids)) {
+      if (aligned(d.dir) || !stepAllowed(ctx, d.candidate_id)) continue;
+      ctx.journal.touch(d.candidate_id);
+      try {
+        await align(ctx.gateDeps, d, slugOf(d.dir));
+      } catch (err) {
+        errorOf(ctx, "align", d.candidate_id, err);
+      }
+    }
+  },
   async gates(ctx) {
     for (const d of drafts(ctx.db, ["ran", "run_failed"], ctx.ids)) {
+      // Стенд прошёл, а текст ещё не сверен с выводом (ADR 0003): проверка подождёт шага align.
+      if (d.status === "ran" && !aligned(d.dir)) continue;
       if (!stepAllowed(ctx, d.candidate_id)) continue;
       ctx.journal.touch(d.candidate_id);
       try {

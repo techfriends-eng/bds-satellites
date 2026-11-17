@@ -33,6 +33,7 @@ test("потолок: платные шаги стоят, схемы и публ
     "select",
     "draft",
     "stand",
+    "align",
     "gates",
     "visuals",
     "publish",
@@ -63,5 +64,14 @@ test("tickSteps: новые темы только первым тактом не
   assert.deepEqual(tickSteps(true), RUN_STEPS);
   const t = tickSteps(false);
   assert.ok(!t.includes("collect") && !t.includes("select"));
-  assert.deepEqual(t, ["visuals", "draft", "stand", "gates", "revise", "visuals", "publish"]);
+  assert.deepEqual(t, [
+    "visuals",
+    "draft",
+    "stand",
+    "align",
+    "gates",
+    "revise",
+    "visuals",
+    "publish",
+  ]);
 });
