@@ -55,8 +55,8 @@ ssh progon 'sudo -u bds-sat-__SITE__ -H bash -lc "cd /opt/bds-sat-__SITE__ && no
 
 **SEO в WordPress (ToDo 99).** Метки из Keywords пишутся всегда (`publish.tags: true` по умолчанию). Поля Yoast
 пишутся только при `publish.seoMeta: true` и только после установки mu-плагина на сайт:
-`node_modules/bds-satellites/wp/mu-plugins/bds-rest-seo-meta.php` → `wp-content/mu-plugins/` сайта (доступ
-к хостингу у автора). Проверка: `curl -s -X OPTIONS https://__DOMAIN__/wp-json/wp/v2/posts` — в
+`node_modules/bds-satellites/wp/mu-plugins/bds-rest-seo-meta.php` → `wp-content/mu-plugins/` сайта: выкладывает
+webmaster (файловый менеджер Timeweb или ssh, у нас доступа нет; RUNBOOK bds-satellites §2). Проверка: `curl -s -X OPTIONS https://__DOMAIN__/wp-json/wp/v2/posts` — в
 `schema.properties.meta` есть `_yoast_wpseo_title`. Без плагина при `seoMeta: true` публикация останавливается
 с ошибкой в журнале хаба, а не пишет SEO мимо.
 
