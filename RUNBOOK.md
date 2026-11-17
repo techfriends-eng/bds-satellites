@@ -38,6 +38,12 @@ flowchart LR
 Статусы кандидата: `new → (dup|bds|radar|skip) → picked → drafted → ran|run_failed → ready|gate_failed`
 (`rejected` — план сказал «не брать»; `unreadable` — текст исходника не получен, см. §5).
 
+**Где стоит WordPress (ToDo 18, со слов автора 17.11).** bigdataschool.ru — Timeweb Cloud (5.42.103.133);
+kafka-school.ru, spark-school.ru, python-school.ru — один VDS Timeweb (213.171.3.125, там же babok-school.ru).
+Доступ к файлам — файловый менеджер панели Timeweb и ssh, у нас доступа нет. Плагины и mu-плагины выкладывает
+и правит webmaster: передать ему файл из репо и путь назначения `wp-content/mu-plugins/`. Проверка после
+выкладки — запрос `OPTIONS` к REST (`curl -s -X OPTIONS https://<домен>/wp-json/wp/v2/posts`, в `schema.properties.meta` есть `_yoast_wpseo_title`). На 17.11 mu-плагины SEO стоят на всех четырёх сайтах.
+
 ## 3. Карта файлов на хосте
 
 На progon у каждого сайта своё (RUNBOOK сайта §3): `/opt/bds-sat-<site>` (пакет — `node_modules/bds-satellites`),
