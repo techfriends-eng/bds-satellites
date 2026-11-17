@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Форк: techfriends-eng/bds-content@a6963f8, lint/content_lint.py
+"""Форк: techfriends-eng/bds-content@c7768a6, lint/content_lint.py
 Общий линтер контента BDS с профилями wiki, blog и sat (bds-content ADR 0001, п. 2).
 
 Источник — techfriends-eng/bds-content, lint/content_lint.py. Проекты держат копию с шапкой форка
@@ -93,6 +93,9 @@ PROFILES = {
         "style_gate": True,        # в --json список style_failed: такая статья не уходит в WP
         # Кнопка решения задания: тема сайтов прячет маркер <summary> (ToDo 102, вид выбран автором 17.11)
         "solution_summary": "<strong>▶ Решение</strong> (нажмите, чтобы открыть)",
+        # Таблица в колонке темы (около 750 px): широкая или с длинными ячейками не читается (ToDo 104)
+        "table_max_cols": 5,
+        "table_max_cell": 80,
     },
 }
 PROFILE = PROFILES["wiki"]
@@ -247,6 +250,26 @@ def check_structure(html: str, report: Report) -> None:
         report.check(not bad, "Кнопка «Решение» в заданиях",
                      f"{len(summaries)} шт, все по образцу",
                      f"{len(bad)} не по образцу <summary>{want}</summary>: {bad[:3]}")
+
+    max_cols, max_cell = PROFILE.get("table_max_cols"), PROFILE.get("table_max_cell")
+    if max_cols:
+        wide, long_cells = [], []
+        for t in re.findall(r"<table\b.*?</table>", html, flags=re.S):
+            rows = [re.findall(r"<t[hd]\b[^>]*>(.*?)</t[hd]>", r, flags=re.S)
+                    for r in re.findall(r"<tr\b[^>]*>(.*?)</tr>", t, flags=re.S)]
+            cols = max((len(r) for r in rows), default=0)
+            if cols > max_cols:
+                wide.append(cols)
+            for r in rows:
+                for c in r:
+                    text = re.sub(r"\s+", " ", html_mod.unescape(re.sub(r"<[^>]+>", "", c))).strip()
+                    if len(text) > max_cell:
+                        long_cells.append(f"{text[:40]}… ({len(text)})")
+        report.check(not wide and not long_cells, "Таблицы компактные",
+                     f"колонок до {max_cols}, ячейки до {max_cell} знаков",
+                     (f"колонок {wide} при пределе {max_cols}; " if wide else "")
+                     + (f"{len(long_cells)} ячеек длиннее {max_cell} знаков: {long_cells[:3]}" if long_cells else "")
+                     + ". Признаков много — строки, а не колонки; пояснения — в текст")
 
     if PROFILE["require_table"]:
         tables = re.findall(r"<table>.*?<thead>.*?</thead>.*?<tbody>.*?</tbody>.*?</table>", html, flags=re.S)
