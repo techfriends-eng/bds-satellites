@@ -8,7 +8,16 @@ import type { Llm, Stage } from "../llm/client.ts";
 import { openState } from "../store/db.ts";
 import { loadStyle } from "../style/rules.ts";
 import { images, links, sourceLinked, sourceNumbers, sourceUse, uniqueness } from "./checks.ts";
-import { finish, gate, REWORK_ISSUE, reviseOnce, rework, type GateDeps } from "./run.ts";
+import {
+  align,
+  aligned,
+  finish,
+  gate,
+  REWORK_ISSUE,
+  reviseOnce,
+  rework,
+  type GateDeps,
+} from "./run.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..");
 const cfg = parseSiteConfig(
@@ -316,4 +325,44 @@ test("ссылки: только идея из исходника — ссылк
     '<p>У нас 1840 и 37.</p><pre class="EnlighterJSRAW" data-enlighter-language="generic">1840 msg/s 37 ms</pre>';
   assert.deepEqual(sourceNumbers(ours, src, ""), []);
   assert.deepEqual(sourceNumbers(taken, src, "1840"), ["37"]);
+});
+
+test("сверка (ADR 0003): текст правится по выводу, вывод и код заморожены, новый прогон — сверка заново", async () => {
+  const html = `<p>Ждём смещение около 30.</p>\n${pre("bash", "# run.sh\necho real")}\n<!-- output run.sh -->\n${pre("generic", "offset=1")}`;
+  const { db, dir } = setup(html);
+  writeFileSync(join(dir, ".work", "run.json"), JSON.stringify({ ok: true, log: [], results: {} }));
+  const fix = `=====FIND ARTICLE=====\n<p>Ждём смещение около 30.</p>\n=====REPLACE=====\n<p>Смещение равно 1.</p>\n=====FIND ARTICLE=====\noffset=1\n=====REPLACE=====\noffset=30`;
+  const r = await align(deps(db, { align: fix }), { candidate_id: 5, dir }, "s1");
+  assert.equal(r.ok, true, r.detail);
+  const out = readFileSync(join(dir, "s1.html"), "utf8");
+  assert.ok(out.startsWith("<p>Смещение равно 1.</p>"));
+  assert.ok(out.includes("offset=1") && !out.includes("offset=30"), "вывод только настоящий");
+  assert.equal(aligned(dir), true);
+  writeFileSync(
+    join(dir, ".work", "run.json"),
+    JSON.stringify({ ok: true, log: [1], results: {} }),
+  );
+  assert.equal(aligned(dir), false, "новый прогон стенда — сверка заново");
+});
+
+test("сверка: правка кода не применяется, статья идёт в проверки как есть", async () => {
+  const html = `<p>a</p>\n${pre("bash", "# run.sh\necho real")}\n<!-- output run.sh -->\n${pre("generic", "вывод")}`;
+  const { db, dir } = setup(html);
+  writeFileSync(join(dir, ".work", "run.json"), JSON.stringify({ ok: true, log: [], results: {} }));
+  const code = `=====FIND ARTICLE=====\n<p>a</p>\n=====REPLACE=====\n<p>b</p>\n=====FIND ARTICLE=====\necho real\n=====REPLACE=====\necho new`;
+  const r = await align(deps(db, { align: code }), { candidate_id: 5, dir }, "s1");
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /меняет код run\.sh/);
+  assert.equal(readFileSync(join(dir, "s1.html"), "utf8"), html);
+  assert.equal(aligned(dir), true, "отказ тоже итог: проверки не ждут");
+  const none = await align(deps(db, { align: "всё сходится" }), { candidate_id: 5, dir }, "s1");
+  assert.deepEqual([none.ok, none.edits], [true, 0]);
+});
+
+test("сверка: без своей строки в конфиге — модели и effort правки", () => {
+  const c = parseSiteConfig(
+    "site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}\nselect: {keywords: [kafka]}\nllm: {models: {revise: [claude-cli:sonnet, anthropic/claude-sonnet-5.5]}, reasoning: {revise: {effort: medium}}}\n",
+  );
+  assert.deepEqual(c.llm.models.align, ["claude-cli:sonnet", "anthropic/claude-sonnet-5.5"]);
+  assert.deepEqual(c.llm.reasoning.align, { effort: "medium" });
 });
