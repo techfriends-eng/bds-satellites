@@ -94,20 +94,29 @@ export async function publishDraft(
   },
   draft: { id: number; candidate_id: number; dir: string; wp_post_id: number | null },
   slug: string,
-): Promise<Published | { blocked: string[] }> {
+): Promise<Published | { blocked: string[] } | { held: string }> {
   const { db, cfg, wp, creds } = deps;
   const blocked = deps.styleFailures(draft.dir, slug);
   if (blocked.length) return { blocked };
   const paths = draftPaths(draft.dir, slug);
+  const gatesFile = join(paths.work, "gates.json");
+  const report = existsSync(gatesFile)
+    ? (JSON.parse(readFileSync(gatesFile, "utf8")) as GatesReport)
+    : null;
+  // Опубликованный пост меняет только версия, прошедшая проверки (ToDo 97): провал остаётся
+  // в черновике на диске, читатель видит прежний текст.
+  if (draft.wp_post_id && !report?.ok) {
+    const live = await wp.getEntryStatus(draft.wp_post_id, creds);
+    if (live.status === "publish")
+      return {
+        held: `пост ${draft.wp_post_id} опубликован, проверки не пройдены: текст на сайте не трогаем`,
+      };
+  }
   // Уже созданные черновики (ToDo 102) получают новую кнопку при следующей публикации.
   const raw = readFileSync(paths.html, "utf8");
   let html = solutionButtons(raw);
   if (html !== raw) writeFileSync(paths.html, html);
   const meta = readFileSync(paths.meta, "utf8");
-  const gatesFile = join(paths.work, "gates.json");
-  const report = existsSync(gatesFile)
-    ? (JSON.parse(readFileSync(gatesFile, "utf8")) as GatesReport)
-    : null;
 
   const { preview, schemes } = parseVisuals(meta);
   // Загруженное помним: повторная публикация не плодит копии картинок в медиатеке.

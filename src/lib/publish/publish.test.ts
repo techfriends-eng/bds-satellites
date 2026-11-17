@@ -213,3 +213,41 @@ test("публикация: метки из Keywords; seoMeta без mu-плаг
     "обновление без categories",
   );
 });
+
+test("опубликованный пост и провал проверок: текст на сайте не трогаем; черновик WP обновляется", async () => {
+  for (const [live, expectHeld] of [
+    ["publish", true],
+    ["draft", false],
+  ] as const) {
+    const { db, dir } = setup();
+    writeFileSync(
+      join(dir, ".work", "gates.json"),
+      JSON.stringify({ ok: false, checks: { lint: { ok: false, detail: "x" } }, review: [] }),
+    );
+    db.prepare("UPDATE drafts SET wp_post_id = 9185 WHERE id = 1").run();
+    const calls: string[] = [];
+    const wp = {
+      getEntryStatus: async (id: number) => ({ id, link: "l", slug: "s", status: live }),
+      uploadMedia: async (i: { filename: string }) => {
+        calls.push(`media ${i.filename}`);
+        return { id: 1, sourceUrl: `u/${i.filename}` };
+      },
+      updateEntry: async (id: number) => {
+        calls.push(`update ${id}`);
+        return { id, link: "l", slug: "s", status: live };
+      },
+    } as unknown as WpClient;
+    const draft = db.prepare("SELECT * FROM drafts WHERE id = 1").get() as never;
+    const res = await publishDraft(
+      { db, cfg, wp, creds: { username: "u", appPassword: "p" }, styleFailures: () => [] },
+      draft,
+      "s1",
+    );
+    if (expectHeld) {
+      assert.ok("held" in res);
+      assert.deepEqual(calls, []);
+    } else {
+      assert.ok(calls.includes("update 9185"));
+    }
+  }
+});

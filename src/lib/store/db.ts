@@ -51,6 +51,12 @@ const MIGRATIONS: string[] = [
   // A/B моделей черновика (ADR 0002 п. 2): вариант темы и вариант вызова.
   "ALTER TABLE candidates ADD COLUMN variant TEXT",
   "ALTER TABLE llm_calls ADD COLUMN variant TEXT",
+  // ToDo 97: переделка старого поста WP, черновик пишет в этот пост (sat adopt).
+  `CREATE TABLE adopted (
+     candidate_id INTEGER PRIMARY KEY REFERENCES candidates(id),
+     wp_post_id INTEGER NOT NULL UNIQUE,
+     at TEXT NOT NULL
+   )`,
 ];
 
 export type Db = DatabaseSync;

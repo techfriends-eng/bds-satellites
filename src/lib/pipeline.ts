@@ -19,6 +19,7 @@ import { publishDraft } from "./publish/wp.ts";
 import { manualPath } from "./research/source.ts";
 import { pick, score } from "./select/rank.ts";
 import { prefilter } from "./select/prefilter.ts";
+import { adopt } from "./sources/adopt.ts";
 import { collect } from "./sources/collect.ts";
 import { checkDraft } from "./stand/check.ts";
 import { CANDIDATE_COLS, nowIso, openState, type Db } from "./store/db.ts";
@@ -438,7 +439,10 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
           d,
           slugOf(d.dir),
         );
-        if ("blocked" in res) {
+        if ("held" in res) {
+          const list = (ctx.journal.stats.live_held ??= []) as unknown[];
+          list.push({ id: d.candidate_id, reason: res.held });
+        } else if ("blocked" in res) {
           const list = (ctx.journal.stats.style_blocked ??= []) as unknown[];
           list.push({ id: d.candidate_id, items: res.blocked.map((b) => b.slice(0, 200)) });
         }
@@ -448,6 +452,33 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
     }
   },
 };
+
+/**
+ * `sat adopt <id поста WP> <url исходника> [заголовок…]` (ToDo 97): старый пост переделывается по
+ * новым правилам. Кандидат встаёт в picked, дальше обычные такты; публикация обновит этот пост.
+ */
+async function adoptCommand(db: Db, rest: string[]): Promise<number> {
+  const [idArg, url, ...titleWords] = rest;
+  const wpPostId = Number(idArg);
+  if (!Number.isInteger(wpPostId) || wpPostId <= 0 || !/^https?:\/\//.test(url ?? "")) {
+    console.error("sat adopt: нужно <id поста WP> <url исходника> [заголовок]");
+    return 2;
+  }
+  const wp = createWp({ baseUrl: readSecret("WP_URL") });
+  const creds = { username: readSecret("WP_USER"), appPassword: readSecret("WP_APP_PASSWORD") };
+  const post = await wp.getEntryStatus(wpPostId, creds); // нет поста — ошибка WP, привязки нет
+  const res = adopt(db, { wpPostId, url, title: titleWords.join(" ") || url });
+  console.log(
+    JSON.stringify({
+      candidate: res.candidateId,
+      created: res.created,
+      wp_post_id: post.id,
+      wp_status: post.status,
+      link: post.link,
+    }),
+  );
+  return 0;
+}
 
 /** Предложение палитры: `--domain` у нового сайта, конфига которого ещё нет в разборе. */
 async function brandSuggest(rest: string[]): Promise<number> {
@@ -503,6 +534,7 @@ export async function main(argv: string[]): Promise<number> {
     console.log(formatAb(abReport(db)));
     return 0;
   }
+  if (command === "adopt") return adoptCommand(db, rest);
   if (command === "note") {
     // Прогон без работы (пропуск обёрткой): запись в журнал хаба, чтобы сторож видел причину.
     const note = createJournal(db, cfg, "note");
@@ -537,7 +569,7 @@ export async function main(argv: string[]): Promise<number> {
             : []);
   if (!steps.length && command !== "sync") {
     console.error(
-      `sat: неизвестная команда ${command}; есть run, tick, sync, note, rework, rerender, brand-check, brand-suggest, ${STEPS.join(", ")}`,
+      `sat: неизвестная команда ${command}; есть run, tick, sync, note, adopt, rework, rerender, brand-check, brand-suggest, ${STEPS.join(", ")}`,
     );
     return 2;
   }

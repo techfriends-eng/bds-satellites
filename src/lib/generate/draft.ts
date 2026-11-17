@@ -9,6 +9,7 @@ import { createFetcher, docUrlAllowed, formatLog, type GetHtml } from "../resear
 import { manualPath, MIN_SOURCE_WORDS, readSource, wordCount } from "../research/source.ts";
 import { nowIso, type Db } from "../store/db.ts";
 import type { Style } from "../style/rules.ts";
+import { adoptedPost } from "../sources/adopt.ts";
 
 /**
  * Черновик: разведка исходника → план с вердиктом → документация → статья и метаданные.
@@ -191,6 +192,10 @@ export async function writeDraft(deps: DraftDeps, row: Candidate): Promise<strin
     paths.dir,
     nowIso(),
   );
+  // Тема из sat adopt: черновик обновит старый пост вместо нового (ToDo 97).
+  const adoptedId = adoptedPost(db, row.id);
+  if (adoptedId)
+    db.prepare("UPDATE drafts SET wp_post_id = ? WHERE candidate_id = ?").run(adoptedId, row.id);
   db.prepare("UPDATE candidates SET status = 'drafted' WHERE id = ?").run(row.id);
   rmSync(cachePath, { force: true });
   return paths.dir;
