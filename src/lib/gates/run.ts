@@ -14,7 +14,28 @@ import { images, links, lint, sourceUse, uniqueness, type Check, type Head } fro
  * (текст против реального вывода). Провал — переписывание по выводу, замечаниям и провалам линтера,
  * при смене кода — повторный прогон, не больше gates.maxRevisions кругов.
  */
-export type Issue = { severity: string; quote: string; problem: string; fix?: string };
+export type Issue = {
+  kind?: string;
+  severity: string;
+  quote: string;
+  problem: string;
+  fix?: string;
+};
+
+/**
+ * Серьёзность по типу замечания. Модель выбирает тип, оценку ставит код: так модель не может поднять
+ * «вывод шире замера» до high (так было в прогонах 10–16.11). Тип вне списка — high.
+ */
+export const KIND_SEVERITY: Record<string, "high" | "medium" | "low"> = {
+  output_mismatch: "high",
+  unsupported_fact: "high",
+  prep_mention: "high",
+  source_detail: "high",
+  broader_than_measured: "medium",
+  outdated: "medium",
+  retelling: "medium",
+  minor: "low",
+};
 export type GatesReport = { ok: boolean; checks: Record<string, Check>; review: Issue[] };
 
 export type GateDeps = StandDeps & { style: Style; lintPy: string; head: Head };
@@ -42,8 +63,8 @@ export async function review(
   const issues =
     parseJson<{ issues?: Issue[] }>(await deps.llm.ask("review", system, user, 24_000, candidateId))
       .issues ?? [];
-  // Без оценки — считаем серьёзным: сбой формата ответа не должен давать PASS.
-  for (const i of issues) if (!["high", "medium", "low"].includes(i.severity)) i.severity = "high";
+  // Без типа или с чужим типом — серьёзно: сбой формата ответа не должен давать PASS.
+  for (const i of issues) i.severity = KIND_SEVERITY[i.kind ?? ""] ?? "high";
   return issues;
 }
 

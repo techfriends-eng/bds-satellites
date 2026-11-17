@@ -90,6 +90,42 @@ function deps(db: ReturnType<typeof openState>, answers: Partial<Record<Stage, s
   };
 }
 
+test("серьёзность ставит код по типу замечания, оценка модели не учитывается", async () => {
+  const html = `<p>лид</p>\n${pre("bash", "# run.sh\necho")}\n<!-- output run.sh -->\n${pre("generic", "ok")}`;
+  const { db, dir } = setup(html);
+  const issues = [
+    { kind: "broader_than_measured", severity: "high", quote: "q", problem: "шире замера" },
+    { kind: "outdated", severity: "high", quote: "q", problem: "старая версия" },
+    { kind: "minor", quote: "q", problem: "мелочь" },
+  ];
+  const rep = await gate(
+    deps(db, { review: JSON.stringify({ issues }) }),
+    { candidate_id: 5, dir },
+    "s1",
+  );
+  assert.deepEqual(
+    rep.review.map((i) => i.severity),
+    ["medium", "medium", "low"],
+  );
+  assert.equal(rep.checks.review.ok, true);
+  assert.equal(rep.checks.review.detail, "замечаний 3, high 0");
+
+  const bad = [
+    { kind: "output_mismatch", quote: "q", problem: "против вывода" },
+    { kind: "other", severity: "low", quote: "q", problem: "чужой тип" },
+  ];
+  const rep2 = await gate(
+    deps(db, { review: JSON.stringify({ issues: bad }) }),
+    { candidate_id: 5, dir },
+    "s1",
+  );
+  assert.deepEqual(
+    rep2.review.map((i) => i.severity),
+    ["high", "high"],
+  );
+  assert.equal(rep2.checks.review.ok, false);
+});
+
 test("проверки: линтер оформления и смысловая проверка дают провал, отчёт в .work, статус gate_failed", async () => {
   const html = `<p>KRaft — лид: <code>x</code> <a href="https://src/a">исходник</a></p>\n${pre("bash", "# run.sh\necho")}\n<!-- output run.sh -->\n${pre("generic", "ok")}`;
   const { db, dir } = setup(html);
