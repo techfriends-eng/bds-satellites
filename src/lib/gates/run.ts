@@ -2,7 +2,13 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { applyEdits, parseEdits, type Edit } from "../article/edits.ts";
-import { outputsOf, parseArticle, setOutputs, solutionButtons, tableLayout } from "../article/html.ts";
+import {
+  outputsOf,
+  parseArticle,
+  setOutputs,
+  solutionButtons,
+  tableLayout,
+} from "../article/html.ts";
 import { ARTICLE_MAX_TOKENS, draftPaths } from "../generate/draft.ts";
 import { parseJson } from "../llm/client.ts";
 import { render } from "../prompts/render.ts";

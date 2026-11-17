@@ -119,14 +119,22 @@ test("tableLayout: ширина по тексту, влево, перенос д
   ].join("\n");
   const out = tableLayout(html);
   assert.ok(out.includes("<table><thead>"), "тег table без атрибутов: по нему ищет линтер");
-  const widths = [...out.matchAll(/<th style="width:(\d+)%;text-align:left">/g)].map((m) => Number(m[1]));
+  const widths = [...out.matchAll(/<th style="width:(\d+)%;text-align:left">/g)].map((m) =>
+    Number(m[1]),
+  );
   assert.equal(widths.length, 3);
-  assert.equal(widths.reduce((a, b) => a + b, 0), 100);
+  assert.equal(
+    widths.reduce((a, b) => a + b, 0),
+    100,
+  );
   assert.ok(widths[1] > widths[0] && widths[1] > widths[2], `текстовая колонка шире: ${widths}`);
   assert.equal(out.match(/<td style="text-align:left">/g)?.length, 6);
   assert.ok(out.includes("spark.<wbr>sql.<wbr>auto<wbr>Broadcast<wbr>Join<wbr>Threshold"));
   assert.ok(out.includes('href="https://spark.apache.org/docs/x.y"'), "атрибуты ссылок не трогаем");
-  assert.ok(out.includes(">Broadcast<wbr>Hash<wbr>Join</td>"), "длинное CamelCase-имя рвётся по словам");
+  assert.ok(
+    out.includes(">Broadcast<wbr>Hash<wbr>Join</td>"),
+    "длинное CamelCase-имя рвётся по словам",
+  );
   assert.ok(out.includes(">SortMergeJoin</td>"), "короче LONG_WORD не рвём");
   assert.equal(tableLayout(out), out);
   assert.equal(tableLayout("<p>нет таблиц</p>"), "<p>нет таблиц</p>");

@@ -39,7 +39,9 @@ export const LONG_WORD = 16;
 const MIN_SHARE = 0.08;
 
 function cellText(inner: string): string {
-  return unescapeHtml(inner.replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
+  return unescapeHtml(inner.replace(/<[^>]+>/g, ""))
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** Куски длинного имени между точками переноса: после «.», «_», «/», затем по CamelCase. */
@@ -58,7 +60,13 @@ function breakLong(inner: string): string {
 }
 
 function longestChunk(text: string): number {
-  return Math.max(0, ...text.split(/\s+/).flatMap(pieces).map((w) => w.length));
+  return Math.max(
+    0,
+    ...text
+      .split(/\s+/)
+      .flatMap(pieces)
+      .map((w) => w.length),
+  );
 }
 
 /**
@@ -72,7 +80,9 @@ export function columnShares(rows: string[][]): number[] {
   if (!n) return [];
   const cols = Array.from({ length: n }, (_, i) => rows.map((r) => r[i] ?? ""));
   const mean = cols.map((c) => Math.max(1, c.reduce((a, t) => a + t.length, 0) / c.length));
-  const floor = cols.map((c) => Math.max(MIN_SHARE, Math.max(0, ...c.map(longestChunk)) / TABLE_CHARS));
+  const floor = cols.map((c) =>
+    Math.max(MIN_SHARE, Math.max(0, ...c.map(longestChunk)) / TABLE_CHARS),
+  );
   const floorSum = floor.reduce((a, b) => a + b, 0);
   if (floorSum > 0.9) for (let i = 0; i < n; i++) floor[i] *= 0.9 / floorSum;
   const share = new Array<number>(n).fill(0);
@@ -109,16 +119,21 @@ export function tableLayout(html: string): string {
     );
     const spans = rows.some((r) => r.some((c) => /\bcolspan=/.test(c.attrs)));
     const body0 = rows.slice(/<thead>/.test(clean) ? 1 : 0);
-    const shares = spans ? [] : columnShares((body0.length ? body0 : rows).map((r) => r.map((c) => c.text)));
+    const shares = spans
+      ? []
+      : columnShares((body0.length ? body0 : rows).map((r) => r.map((c) => c.text)));
     let row = -1;
     const out = clean.replace(/<tr\b[^>]*>[\s\S]*?<\/tr>/g, (tr) => {
       row++;
       let col = -1;
-      return tr.replace(/<(t[hd])\b([^>]*)>([\s\S]*?)<\/\1>/g, (_c, tag: string, attrs: string, inner: string) => {
-        col++;
-        const width = row === 0 && shares.length ? `width:${shares[col]}%;` : "";
-        return `<${tag}${attrs} style="${width}text-align:left">${breakLong(inner)}</${tag}>`;
-      });
+      return tr.replace(
+        /<(t[hd])\b([^>]*)>([\s\S]*?)<\/\1>/g,
+        (_c, tag: string, attrs: string, inner: string) => {
+          col++;
+          const width = row === 0 && shares.length ? `width:${shares[col]}%;` : "";
+          return `<${tag}${attrs} style="${width}text-align:left">${breakLong(inner)}</${tag}>`;
+        },
+      );
     });
     return `<table>${out}</table>`;
   });
