@@ -6,6 +6,7 @@ import type { GatesReport } from "../gates/run.ts";
 import { draftPaths } from "../generate/draft.ts";
 import type { Db } from "../store/db.ts";
 import { parseVisuals } from "@techfriends-eng/toolkit/visuals";
+import { solutionButtons } from "../article/html.ts";
 
 /**
  * Черновик в WordPress сайта через toolkit/wp. Пока статус всегда draft (publish.status).
@@ -98,7 +99,10 @@ export async function publishDraft(
   const blocked = deps.styleFailures(draft.dir, slug);
   if (blocked.length) return { blocked };
   const paths = draftPaths(draft.dir, slug);
-  let html = readFileSync(paths.html, "utf8");
+  // Уже созданные черновики (ToDo 102) получают новую кнопку при следующей публикации.
+  const raw = readFileSync(paths.html, "utf8");
+  let html = solutionButtons(raw);
+  if (html !== raw) writeFileSync(paths.html, html);
   const meta = readFileSync(paths.meta, "utf8");
   const gatesFile = join(paths.work, "gates.json");
   const report = existsSync(gatesFile)

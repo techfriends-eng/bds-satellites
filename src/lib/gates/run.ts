@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { applyEdits, parseEdits, type Edit } from "../article/edits.ts";
-import { outputsOf, parseArticle, setOutputs } from "../article/html.ts";
+import { outputsOf, parseArticle, setOutputs, solutionButtons } from "../article/html.ts";
 import { ARTICLE_MAX_TOKENS, draftPaths } from "../generate/draft.ts";
 import { parseJson } from "../llm/client.ts";
 import { render } from "../prompts/render.ts";
@@ -72,7 +72,10 @@ export async function review(
 export async function gate(deps: GateDeps, draft: Draft, slug: string): Promise<GatesReport> {
   const { db, cfg } = deps;
   const paths = draftPaths(draft.dir, slug);
-  const html = readFileSync(paths.html, "utf8");
+  // Правки revise и align и черновики до v0.1.40 могли оставить старую кнопку: чиним до линтера.
+  const raw = readFileSync(paths.html, "utf8");
+  const html = solutionButtons(raw);
+  if (html !== raw) writeFileSync(paths.html, html);
   const cand = db.prepare("SELECT url FROM candidates WHERE id = ?").get(draft.candidate_id) as {
     url: string;
   };

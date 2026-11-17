@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Форк: techfriends-eng/bds-content@e7c8170, lint/content_lint.py
+"""Форк: techfriends-eng/bds-content@a6963f8, lint/content_lint.py
 Общий линтер контента BDS с профилями wiki, blog и sat (bds-content ADR 0001, п. 2).
 
 Источник — techfriends-eng/bds-content, lint/content_lint.py. Проекты держат копию с шапкой форка
@@ -91,6 +91,8 @@ PROFILES = {
         "brand_colors": False,     # палитру схем задаёт визуал спутника, не init-блок A8
         "scheme_files": True,      # <slug>_schemeN.jpg рядом со статьёй — не лишний файл
         "style_gate": True,        # в --json список style_failed: такая статья не уходит в WP
+        # Кнопка решения задания: тема сайтов прячет маркер <summary> (ToDo 102, вид выбран автором 17.11)
+        "solution_summary": "<strong>▶ Решение</strong> (нажмите, чтобы открыть)",
     },
 }
 PROFILE = PROFILES["wiki"]
@@ -237,6 +239,14 @@ def check_structure(html: str, report: Report) -> None:
                  f"{len(wrapped)} переносов внутри блоков, строки {wrapped[:10]}, "
                  f"лечится прогоном python3 wiki_unwrap.py <slug>"
                  + (" --profile blog" if PROFILE is PROFILES["blog"] else ""))
+
+    want = PROFILE.get("solution_summary")
+    if want:
+        summaries = re.findall(r"<summary([^>]*)>(.*?)</summary>", html, flags=re.S)
+        bad = [body.strip() for attrs, body in summaries if attrs.strip() or body.strip() != want]
+        report.check(not bad, "Кнопка «Решение» в заданиях",
+                     f"{len(summaries)} шт, все по образцу",
+                     f"{len(bad)} не по образцу <summary>{want}</summary>: {bad[:3]}")
 
     if PROFILE["require_table"]:
         tables = re.findall(r"<table>.*?<thead>.*?</thead>.*?<tbody>.*?</tbody>.*?</table>", html, flags=re.S)
