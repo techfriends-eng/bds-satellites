@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Форк: techfriends-eng/bds-content@e878ecc, lint/content_lint.py
+"""Форк: techfriends-eng/bds-content@fdc72be, lint/content_lint.py
 Общий линтер контента BDS с профилями wiki, blog и sat (bds-content ADR 0001, п. 2).
 
 Источник — techfriends-eng/bds-content, lint/content_lint.py. Проекты держат копию с шапкой форка
@@ -96,6 +96,10 @@ PROFILES = {
         # Таблица в колонке темы (около 750 px): широкая или с длинными ячейками не читается (ToDo 104)
         "table_max_cols": 5,
         "table_max_cell": 80,
+        # <code> только вокруг одного идентификатора: плагин Encyclopedia Pro на сайтах подсвечивает
+        # термины и внутри имён (Join в SortMergeJoin), а <code> обходит. Обёртку ставит
+        # bds-satellites перед публикацией (ToDo 104, решение автора 18.11)
+        "code_idents": True,
     },
 }
 PROFILE = PROFILES["wiki"]
@@ -154,6 +158,25 @@ class Report:
         width = max(len(name) for _, name, _ in self.rows) + 2
         for status, name, comment in self.rows:
             print(f"  {status:<5} {name:<{width}} {comment}")
+
+
+CODE_IDENT = re.compile(r"[A-Za-z_][\w.()\[\]/-]*")
+
+
+def code_not_ident(html: str) -> list[str]:
+    """Теги <code>, в которых не один идентификатор: атрибуты, пробелы, кириллица, вложенные теги."""
+    text = strip_code(html)
+    good = 0
+    bad = []
+    for attrs, inner in re.findall(r"<code\b([^>]*)>(.*?)</code>", text, flags=re.S):
+        name = inner.replace("<wbr>", "")
+        if attrs.strip() or not CODE_IDENT.fullmatch(name):
+            bad.append(inner[:40])
+        else:
+            good += 1
+    if text.count("<code") > good + len(bad):
+        bad.append("<code> без пары")
+    return bad
 
 
 def strip_code(html: str) -> str:
@@ -355,7 +378,11 @@ def check_style(html: str, report: Report) -> None:
         check_preparation(text, report)
     dashes = STRICT_DASH.findall(text) if PROFILE.get("strict_dash") else re.findall("—", text)
     report.check(not dashes, "Длинное тире", "нет", f"{len(dashes)} шт")
-    report.check("<code" not in html, "Тег code", "нет", "найден")
+    if PROFILE.get("code_idents"):
+        bad = code_not_ident(html)
+        report.check(not bad, "Тег code", "только вокруг идентификатора", f"{len(bad)} шт: {bad[:3]}")
+    else:
+        report.check("<code" not in html, "Тег code", "нет", "найден")
     report.check("`" not in text, "Backtick вне блоков кода", "нет", f"{text.count('`')} шт")
     report.check("<hr" not in html, "Горизонтальный разделитель", "нет", "найден")
     # Эмодзи ищем только в тексте статьи. Внутри <pre> лежит реальный вывод

@@ -138,7 +138,7 @@ test("серьёзность ставит код по типу замечани�
 });
 
 test("проверки: линтер оформления и смысловая проверка дают провал, отчёт в .work, статус gate_failed", async () => {
-  const html = `<p>KRaft — лид: <code>x</code> <a href="https://src/a">исходник</a></p>\n${pre("bash", "# run.sh\necho")}\n<!-- output run.sh -->\n${pre("generic", "ok")}`;
+  const html = `<p>KRaft — лид: <code>x y</code> <a href="https://src/a">исходник</a></p>\n${pre("bash", "# run.sh\necho")}\n<!-- output run.sh -->\n${pre("generic", "ok")}`;
   const { db, dir } = setup(html);
   const rep = await gate(
     deps(db, { review: '{"issues": [{"quote": "q", "problem": "p"}]}' }),
