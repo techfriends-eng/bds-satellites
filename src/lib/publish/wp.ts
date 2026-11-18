@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { WpClient, WpCredentials } from "@techfriends-eng/toolkit/wp";
+import { WpError, type WpClient, type WpCredentials } from "@techfriends-eng/toolkit/wp";
 import type { SiteConfig } from "../config/site.ts";
 import type { GatesReport } from "../gates/run.ts";
 import { draftPaths } from "../generate/draft.ts";
@@ -84,15 +84,48 @@ function withoutPrimary(meta?: Record<string, string>): Record<string, string> |
 
 export type Published = { id: number; link: string; status: string };
 
+/** Пост удалён в WP насовсем: REST отвечает 404 `rest_post_invalid_id` (корзина отдаёт 200 со status trash). */
+export function postGone(err: unknown): boolean {
+  return (
+    err instanceof WpError && err.status === 404 && err.message.includes("rest_post_invalid_id")
+  );
+}
+
+type PublishDeps = {
+  db: Db;
+  cfg: SiteConfig;
+  wp: WpClient;
+  creds: WpCredentials;
+  styleFailures: (dir: string, slug: string) => string[];
+};
+type DraftRef = { id: number; candidate_id: number; dir: string; wp_post_id: number | null };
+
+/**
+ * Публикация черновика. Пост, который человек удалил в WP, конвейер не пересоздаёт: удаление —
+ * решение автора (18.11 spark #9209 — дубль темы #9212, прогон каждый раз падал на updateEntry 404).
+ * Тема уходит в rejected с причиной, черновик на диске остаётся.
+ */
 export async function publishDraft(
-  deps: {
-    db: Db;
-    cfg: SiteConfig;
-    wp: WpClient;
-    creds: WpCredentials;
-    styleFailures: (dir: string, slug: string) => string[];
-  },
-  draft: { id: number; candidate_id: number; dir: string; wp_post_id: number | null },
+  deps: PublishDeps,
+  draft: DraftRef,
+  slug: string,
+): Promise<Published | { blocked: string[] } | { held: string } | { gone: string }> {
+  try {
+    return await publishOnce(deps, draft, slug);
+  } catch (err) {
+    if (!draft.wp_post_id || !postGone(err)) throw err;
+    const reason = `пост WP ${draft.wp_post_id} удалён вручную, тема снята`;
+    deps.db.prepare("UPDATE drafts SET wp_status = 'deleted' WHERE id = ?").run(draft.id);
+    deps.db
+      .prepare("UPDATE candidates SET status = 'rejected', score_reason = ? WHERE id = ?")
+      .run(reason, draft.candidate_id);
+    return { gone: reason };
+  }
+}
+
+async function publishOnce(
+  deps: PublishDeps,
+  draft: DraftRef,
   slug: string,
 ): Promise<Published | { blocked: string[] } | { held: string }> {
   const { db, cfg, wp, creds } = deps;

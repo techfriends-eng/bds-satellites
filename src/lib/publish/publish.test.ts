@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { WpClient } from "@techfriends-eng/toolkit/wp";
+import { WpError, type WpClient } from "@techfriends-eng/toolkit/wp";
 import { parseSiteConfig } from "../config/site.ts";
 import { articleRow, createJournal } from "../journal/journal.ts";
 import { openState } from "../store/db.ts";
@@ -249,5 +249,49 @@ test("опубликованный пост и провал проверок: т
     } else {
       assert.ok(calls.includes("update 9185"));
     }
+  }
+});
+
+test("пост удалён в WP вручную: тема снята, пост не пересоздаётся; прочие ошибки WP летят дальше", async () => {
+  for (const [status, body, gone] of [
+    [404, '{"code":"rest_post_invalid_id"}', true],
+    [500, '{"code":"internal_server_error"}', false],
+  ] as const) {
+    const { db } = setup();
+    db.prepare("UPDATE drafts SET wp_post_id = 9209 WHERE id = 1").run();
+    const calls: string[] = [];
+    const wp = {
+      uploadMedia: async (i: { filename: string }) => ({ id: 1, sourceUrl: `u/${i.filename}` }),
+      createEntry: async () => {
+        calls.push("create");
+        return { id: 1, link: "l", slug: "s", status: "draft" };
+      },
+      updateEntry: async () => {
+        throw new WpError("updateEntry", status, body);
+      },
+    } as unknown as WpClient;
+    const draft = db.prepare("SELECT * FROM drafts WHERE id = 1").get() as never;
+    const run = publishDraft(
+      { db, cfg, wp, creds: { username: "u", appPassword: "p" }, styleFailures: () => [] },
+      draft,
+      "s1",
+    );
+    if (!gone) {
+      await assert.rejects(run, /HTTP 500/);
+      continue;
+    }
+    const res = await run;
+    assert.ok("gone" in res && res.gone.includes("9209"));
+    assert.deepEqual(calls, []);
+    const c = db.prepare("SELECT status, score_reason FROM candidates WHERE id = 5").get() as {
+      status: string;
+      score_reason: string;
+    };
+    assert.equal(c.status, "rejected");
+    assert.match(c.score_reason, /9209 удалён/);
+    const d = db.prepare("SELECT wp_status FROM drafts WHERE id = 1").get() as {
+      wp_status: string;
+    };
+    assert.equal(d.wp_status, "deleted");
   }
 });
