@@ -51,7 +51,7 @@ stand:
 gates: { minWords: 1500, maxWords: 2600, maxShingleShare: 0.15, maxRevisions: 2 }
 
 publish:
-  status: draft
+  status: draft # future + lane 0..2 — автопубликация по расписанию (CHANGELOG 0.1.45)
   categories: []
 
 schedule: { day: __DAY__ }

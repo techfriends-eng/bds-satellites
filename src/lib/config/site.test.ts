@@ -30,10 +30,10 @@ test("конфиг: источники, выключенные пропущен�
   assert.equal(cfg.bdsBase, "https://bigdataschool.ru");
 });
 
-test("конфиг: пустые ключи, повтор источника и автопубликация — ошибка", () => {
+test("конфиг: пустые ключи, повтор источника и неизвестный статус публикации — ошибка", () => {
   assert.throws(() => parseSiteConfig(YAML.replace("[kafka]", "[]")), /keywords/);
   assert.throws(() => parseSiteConfig(YAML.replace("id: ws,", "id: aiven,")), /повторяется/);
-  assert.throws(() => parseSiteConfig(`${YAML}publish: {status: publish}\n`), /только draft/);
+  assert.throws(() => parseSiteConfig(`${YAML}publish: {status: publish}\n`), /draft или future/);
 });
 
 test("~ раскрывается в дом пользователя", () => {

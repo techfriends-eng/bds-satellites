@@ -1,3 +1,4 @@
+import { LANES } from "../publish/slot.ts";
 import { readFileSync } from "node:fs";
 import { CLI_DEFAULTS, type CliOptions } from "../llm/claude-cli.ts";
 import { parseModel } from "../llm/client.ts";
@@ -71,7 +72,15 @@ export type SiteConfig = {
    * установки mu-плагина wp/mu-plugins/bds-rest-seo-meta.php (RUNBOOK сайта), иначе публикация
    * остановится с ошибкой, а не запишет SEO мимо.
    */
-  publish: { status: "draft"; categories: number[]; tags: boolean; seoMeta: boolean };
+  publish: {
+    /** draft — только черновик; future — прошедшая проверки статья встаёт в расписание (ToDo 98). */
+    status: "draft" | "future";
+    /** Полоса минут сайта в расписании (publish/slot.ts), у каждого спутника своя. */
+    lane: number | null;
+    categories: number[];
+    tags: boolean;
+    seoMeta: boolean;
+  };
   schedule: { day: string };
   bdsBase: string;
 };
@@ -205,16 +214,19 @@ export function parseSiteConfig(text: string): SiteConfig {
   // Пустой список ключей пропустил бы весь пул: это ошибка конфига, а не «без фильтра».
   if (select.keywords.length === 0) throw new Error("select.keywords пуст");
   const publish = section(raw, "publish", {
-    status: "draft" as const,
+    status: "draft" as "draft" | "future",
+    lane: null as number | null,
     categories: [] as number[],
     tags: true,
     seoMeta: false,
   });
-  if (publish.status !== "draft") {
-    throw new Error(
-      "publish.status: пока только draft — автопубликация отдельным решением после пилота",
-    );
-  }
+  if (publish.status !== "draft" && publish.status !== "future")
+    throw new Error(`publish.status: ${publish.status}, нужен draft или future`);
+  if (
+    publish.status === "future" &&
+    !(Number.isInteger(publish.lane) && publish.lane! >= 0 && publish.lane! < LANES)
+  )
+    throw new Error(`publish.lane: при status future нужен 0..${LANES - 1}, у каждого сайта свой`);
   return {
     siteId: raw.site.id,
     domain: raw.site.domain,
