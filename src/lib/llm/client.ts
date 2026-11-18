@@ -56,6 +56,24 @@ export type Llm = {
   flush(): Promise<void>;
 };
 
+/** Команды прогонов по таймеру (ADR 0002 §3): только у них потолок недели. */
+export const TIMER_COMMANDS = ["run", "tick"] as const;
+
+/**
+ * Расход недели для потолка: только вызовы прогонов по таймеру с начала недели `since`.
+ * Ручные команды автора (rework, regate и т. п.) потолок обходят и в расход тактов не входят.
+ */
+export function weekSpent(db: Db, since: string): number {
+  return (
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(cost_usd), 0) AS s FROM llm_calls
+          WHERE at >= ? AND command IN (${TIMER_COMMANDS.map(() => "?").join(", ")})`,
+      )
+      .get(since, ...TIMER_COMMANDS) as { s: number }
+  ).s;
+}
+
 export function createLlm(
   db: Db,
   cfg: SiteConfig,
@@ -64,6 +82,8 @@ export function createLlm(
   cli?: ClaudeCli,
   /** Расход недели сайта до этого процесса (такты, ADR 0002 §3); null — без потолка недели. */
   weekBase: number | null = null,
+  /** Команда процесса (`sat <command>`), пишется в llm_calls: потолок недели считает только такты. */
+  command: string | null = null,
 ): Llm {
   let spent = 0;
   const over = (): string | null => {
@@ -78,8 +98,8 @@ export function createLlm(
     if (ledger) pending.push(ledger.record({ provider: "openrouter", site: cfg.siteId, ...entry }));
   };
   const log = db.prepare(
-    `INSERT INTO llm_calls (at, stage, model, candidate_id, prompt_tokens, completion_tokens, reasoning_tokens, cost_usd, variant)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO llm_calls (at, stage, model, candidate_id, prompt_tokens, completion_tokens, reasoning_tokens, cost_usd, variant, command)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const ab = cfg.llm.ab;
   /** Вариант темы: записан — тот же, нет — тот, у которого меньше тем (при равенстве — первый). */
@@ -111,7 +131,7 @@ export function createLlm(
     },
     charge(stage, model, costUsd, candidateId, ok = true) {
       spent += costUsd;
-      log.run(nowIso(), stage, model, candidateId ?? null, 0, 0, 0, costUsd, null);
+      log.run(nowIso(), stage, model, candidateId ?? null, 0, 0, 0, costUsd, null, command);
       record({ stage, model, ref: candidateId, usage: { costUsd }, ok });
     },
     async ask(stage, system, user, maxTokens, candidateId) {
@@ -175,6 +195,7 @@ export function createLlm(
       u.reasoningTokens,
       u.costUsd,
       variant,
+      command,
     );
     record({
       stage,
@@ -212,6 +233,7 @@ export function createLlm(
       0,
       0,
       variant,
+      command,
     );
     record({
       stage,
