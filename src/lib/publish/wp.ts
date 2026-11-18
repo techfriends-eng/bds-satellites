@@ -7,9 +7,11 @@ import { draftPaths } from "../generate/draft.ts";
 import type { Db } from "../store/db.ts";
 import { parseVisuals } from "@techfriends-eng/toolkit/visuals";
 import { solutionButtons, tableLayout } from "../article/html.ts";
+import { pickSlot } from "./slot.ts";
 
 /**
- * Черновик в WordPress сайта через toolkit/wp. Пока статус всегда draft (publish.status).
+ * Статья в WordPress сайта через toolkit/wp. Пост создаётся черновиком. При publish.status future
+ * черновик, прошедший все проверки, встаёт в расписание WP (ToDo 98, время — publish/slot.ts).
  * Картинки (схемы и превью) — в медиатеку, TODO_IMAGE заменяется адресом. Ссылки на курсы
  * получают UTM. Статья с другим провалом проверок уходит черновиком, причины — комментарием в начале.
  * Провал стиля (двоеточия, тире, заголовок и другие из STYLE_ITEMS линтера) не публикуется и не
@@ -97,6 +99,9 @@ type PublishDeps = {
   wp: WpClient;
   creds: WpCredentials;
   styleFailures: (dir: string, slug: string) => string[];
+  /** Занятые даты сайта (`date_gmt`) для расписания: читаются один раз за прогон, пополняются. */
+  busy?: { dates: string[] | null };
+  now?: () => Date;
 };
 type DraftRef = { id: number; candidate_id: number; dir: string; wp_post_id: number | null };
 
@@ -210,16 +215,40 @@ async function publishOnce(
           categories: cfg.publish.categories,
           tags,
           featuredMedia: featured,
-          status: cfg.publish.status,
+          status: "draft",
           meta: seoMeta,
         },
         creds,
       );
+  const saved = await schedule(deps, entry, report);
   db.prepare("UPDATE drafts SET wp_post_id = ?, wp_url = ?, wp_status = ? WHERE id = ?").run(
-    entry.id,
-    entry.link,
-    entry.status,
+    saved.id,
+    saved.link,
+    saved.status,
     draft.id,
   );
-  return entry;
+  return saved;
+}
+
+/**
+ * В расписание идёт только черновик WP, прошедший все проверки. Пост в другом статусе (future,
+ * publish, pending, private) не трогаем: его поставил конвейер раньше или человек руками.
+ */
+async function schedule(
+  deps: PublishDeps,
+  entry: Published,
+  report: GatesReport | null,
+): Promise<Published> {
+  const { cfg, wp, creds } = deps;
+  if (cfg.publish.status !== "future" || !report?.ok || entry.status !== "draft") return entry;
+  const now = deps.now?.() ?? new Date();
+  const busy = (deps.busy ??= { dates: null });
+  busy.dates ??= await wp.entryDates(
+    new Date(now.getTime() - 14 * 86400_000).toISOString().slice(0, 19),
+    creds,
+  );
+  const dateGmt = pickSlot(busy.dates, cfg.publish.lane ?? 0, now);
+  const out = await wp.publishEntry(entry.id, creds, { dateGmt });
+  busy.dates.push(dateGmt);
+  return { id: out.id, link: out.link, status: out.status };
 }

@@ -295,3 +295,69 @@ test("пост удалён в WP вручную: тема снята, пост 
     assert.equal(d.wp_status, "deleted");
   }
 });
+
+test("расписание: прошедший проверки черновик встаёт в future, проваленный остаётся черновиком", async () => {
+  const { db, dir } = setup();
+  const calls: string[] = [];
+  const wp = {
+    uploadMedia: async (i: { filename: string }) => ({
+      id: 1,
+      sourceUrl: `https://k/${i.filename}`,
+    }),
+    createEntry: async () => ({
+      id: 9300,
+      link: "https://kafka-school.ru/?p=9300",
+      slug: "s1",
+      status: "draft",
+    }),
+    updateEntry: async (id: number) => ({
+      id,
+      link: "https://kafka-school.ru/?p=9300",
+      slug: "s1",
+      status: "draft",
+    }),
+    entryDates: async () => {
+      calls.push("dates");
+      return ["2026-11-18T08:00:00"];
+    },
+    publishEntry: async (id: number, _c: unknown, o: { dateGmt: string }) => {
+      calls.push(`schedule ${id} ${o.dateGmt.slice(0, 10)}`);
+      return { id, link: "https://kafka-school.ru/blog/s1/", slug: "s1", status: "future" };
+    },
+  } as unknown as WpClient;
+  const on = { ...cfg, publish: { ...cfg.publish, status: "future" as const, lane: 0 } };
+  const creds = { username: "u", appPassword: "p" };
+  const draft = () => db.prepare("SELECT * FROM drafts WHERE id = 1").get() as never;
+  const now = () => new Date("2026-11-18T11:40:00Z");
+
+  writeFileSync(
+    join(dir, ".work", "gates.json"),
+    JSON.stringify({ ok: false, checks: {}, review: [] }),
+  );
+  const busy = { dates: null as string[] | null };
+  const deps = { db, cfg: on, wp, creds, styleFailures: () => [], busy, now };
+  assert.equal(((await publishDraft(deps, draft(), "s1")) as { status: string }).status, "draft");
+  assert.deepEqual(calls, []);
+
+  writeFileSync(
+    join(dir, ".work", "gates.json"),
+    JSON.stringify({ ok: true, checks: {}, review: [] }),
+  );
+  const res = (await publishDraft(deps, draft(), "s1")) as { status: string };
+  assert.equal(res.status, "future");
+  assert.deepEqual(calls, ["dates", "schedule 9300 2026-11-20"]);
+  assert.deepEqual(busy.dates?.length, 2);
+  const row = db.prepare("SELECT wp_status, wp_url FROM drafts WHERE id = 1").get() as never;
+  assert.deepEqual(
+    { ...(row as object) },
+    { wp_status: "future", wp_url: "https://kafka-school.ru/blog/s1/" },
+  );
+});
+
+test("конфиг: future без полосы — ошибка", () => {
+  const base =
+    "site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}\nselect: {keywords: [kafka]}\n";
+  assert.throws(() => parseSiteConfig(`${base}publish: {status: future}\n`), /publish.lane/);
+  assert.equal(parseSiteConfig(`${base}publish: {status: future, lane: 2}\n`).publish.lane, 2);
+  assert.throws(() => parseSiteConfig(`${base}publish: {status: publish}\n`), /draft или future/);
+});

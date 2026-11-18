@@ -155,6 +155,7 @@ function drafts(db: Db, statuses: string[], ids?: number[]) {
     candidate_id: number;
     dir: string;
     wp_post_id: number | null;
+    wp_status: string | null;
     status: string;
   }[];
   return ids?.length ? rows.filter((r) => ids.includes(r.candidate_id)) : rows;
@@ -431,11 +432,12 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
     const creds = { username: readSecret("WP_USER"), appPassword: readSecret("WP_APP_PASSWORD") };
     const styleFailures = (dir: string, slug: string) =>
       lint(ctx.gateDeps.lintPy, dir, slug, ctx.cfg.domain, slug).style;
+    const busy = { dates: null as string[] | null };
     for (const d of drafts(ctx.db, ["ready", "gate_failed"], ctx.ids)) {
       ctx.journal.touch(d.candidate_id);
       try {
         const res = await publishDraft(
-          { db: ctx.db, cfg: ctx.cfg, wp, creds, styleFailures },
+          { db: ctx.db, cfg: ctx.cfg, wp, creds, styleFailures, busy },
           d,
           slugOf(d.dir),
         );
@@ -448,6 +450,9 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
         } else if ("blocked" in res) {
           const list = (ctx.journal.stats.style_blocked ??= []) as unknown[];
           list.push({ id: d.candidate_id, items: res.blocked.map((b) => b.slice(0, 200)) });
+        } else if (res.status === "future" && d.wp_status !== "future") {
+          const list = (ctx.journal.stats.scheduled ??= []) as unknown[];
+          list.push({ id: d.candidate_id, post: res.id });
         }
       } catch (err) {
         errorOf(ctx, "publish", d.candidate_id, err);
