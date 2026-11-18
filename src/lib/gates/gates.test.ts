@@ -105,6 +105,8 @@ test("серьёзность ставит код по типу замечани�
   const issues = [
     { kind: "broader_than_measured", severity: "high", quote: "q", problem: "шире замера" },
     { kind: "outdated", severity: "high", quote: "q", problem: "старая версия" },
+    { kind: "prep_mention", severity: "high", quote: "q", problem: "подготовка статьи" },
+    { kind: "source_detail", severity: "high", quote: "q", problem: "деталь исходника" },
     { kind: "minor", quote: "q", problem: "мелочь" },
   ];
   const rep = await gate(
@@ -114,10 +116,10 @@ test("серьёзность ставит код по типу замечани�
   );
   assert.deepEqual(
     rep.review.map((i) => i.severity),
-    ["medium", "medium", "low"],
+    ["medium", "medium", "medium", "medium", "low"],
   );
   assert.equal(rep.checks.review.ok, true);
-  assert.equal(rep.checks.review.detail, "замечаний 3, high 0");
+  assert.equal(rep.checks.review.detail, "замечаний 5, high 0");
 
   const bad = [
     { kind: "output_mismatch", quote: "q", problem: "против вывода" },

@@ -36,8 +36,9 @@ export type Issue = {
 export const KIND_SEVERITY: Record<string, "high" | "medium" | "low"> = {
   output_mismatch: "high",
   unsupported_fact: "high",
-  prep_mention: "high",
-  source_detail: "high",
+  // Стиль подачи, а не неверный факт: идут в правку, но не валят статью (решение автора 18.11).
+  prep_mention: "medium",
+  source_detail: "medium",
   broader_than_measured: "medium",
   outdated: "medium",
   retelling: "medium",
