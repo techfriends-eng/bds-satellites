@@ -65,6 +65,7 @@ export type Step = (typeof STEPS)[number];
 const DRAFT_COMMANDS = {
   rework: ["rework", "rerender", "visuals", "publish"],
   rerender: ["rerender", "visuals", "publish"],
+  regate: ["regate", "publish"],
 } as const;
 type DraftCommand = keyof typeof DRAFT_COMMANDS;
 type AnyStep = Step | DraftCommand;
@@ -420,6 +421,27 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
       }
     }
   },
+  /**
+   * `sat regate <id…>`: проверки заново, без правки текста. Для отчётов, записанных до v0.1.38: тогда
+   * серьёзность ставила модель, а потолок правок (gates.maxRevisionsTotal) у таких черновиков уже
+   * выбран, и тактом их больше никто не перепроверит. Прошла — ready, дальше публикация.
+   */
+  async regate(ctx) {
+    const list = (ctx.journal.stats.regate ??= []) as unknown[];
+    for (const d of drafts(ctx.db, ["gate_failed", "ready"], ctx.ids)) {
+      ctx.journal.touch(d.candidate_id);
+      try {
+        const r = await gate(ctx.gateDeps, d, slugOf(d.dir));
+        list.push({
+          id: d.candidate_id,
+          ok: r.ok,
+          failed: Object.keys(r.checks).filter((k) => !r.checks[k].ok),
+        });
+      } catch (err) {
+        errorOf(ctx, "regate", d.candidate_id, err);
+      }
+    }
+  },
   async rerender(ctx) {
     const list = (ctx.journal.stats.rerender ??= []) as unknown[];
     for (const d of drafts(ctx.db, ["ready", "gate_failed"], ctx.ids)) {
@@ -577,7 +599,7 @@ export async function main(argv: string[]): Promise<number> {
             : []);
   if (!steps.length && command !== "sync") {
     console.error(
-      `sat: неизвестная команда ${command}; есть run, tick, sync, note, adopt, rework, rerender, brand-check, brand-suggest, ${STEPS.join(", ")}`,
+      `sat: неизвестная команда ${command}; есть run, tick, sync, note, adopt, rework, rerender, regate, brand-check, brand-suggest, ${STEPS.join(", ")}`,
     );
     return 2;
   }
