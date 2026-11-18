@@ -4,6 +4,9 @@ import { test } from "node:test";
 import { loadStyle } from "../style/rules.ts";
 import {
   clip,
+  codeIdents,
+  isIdent,
+  normalizeArticle,
   parseArticle,
   SOLUTION_SUMMARY,
   setFile,
@@ -138,4 +141,73 @@ test("tableLayout: ширина по тексту, влево, перенос д
   assert.ok(out.includes(">SortMergeJoin</td>"), "короче LONG_WORD не рвём");
   assert.equal(tableLayout(out), out);
   assert.equal(tableLayout("<p>нет таблиц</p>"), "<p>нет таблиц</p>");
+});
+
+test("isIdent: какие имена уходят в code (ToDo 104)", () => {
+  for (const w of [
+    "SortMergeJoin",
+    "BroadcastNestedLoopJoin",
+    "spark.sql.shuffle.partitions",
+    "autoBroadcastJoinThreshold",
+    "groupBy",
+    "left_anti",
+    "__consumer_offsets",
+    "producer.py",
+    "df.groupBy",
+    "count()",
+    "KAFKA_HEAP_OPTS",
+    "org.apache.kafka.Consumer",
+  ])
+    assert.ok(isIdent(w), w);
+  for (const w of [
+    "ClickHouse",
+    "PySpark",
+    "DataFrame",
+    "macOS",
+    "Node.js",
+    "kafka-school.ru",
+    "spark-school.ru",
+    "Kafka",
+    "API",
+    "v0",
+    "index.html",
+  ])
+    assert.ok(!isIdent(w), w);
+});
+
+test("codeIdents: имена в code, код, ссылки, заголовки и strong не трогаем", () => {
+  const html = [
+    "<h2>Когда выбирают SortMergeJoin</h2>",
+    "<p>Порог spark.sql.autoBroadcastJoinThreshold решает, будет ли BroadcastHashJoin. Иначе SortMergeJoin.</p>",
+    '<p><a href="https://x.org/spark.sql.a_b">ShuffledHashJoin</a> и <strong>SortMergeJoin</strong></p>',
+    '<pre class="EnlighterJSRAW" data-enlighter-language="python">df.groupBy("k").count()</pre>',
+    "<!-- output run_job.py -->",
+    "<details><summary>Решение</summary><p>Вызовите df.groupBy и count().</p></details>",
+    "<p>Сайт kafka-school.ru, DataFrame и PySpark остаются текстом.</p>",
+  ].join("\n");
+  const out = codeIdents(html);
+  assert.ok(out.includes("<h2>Когда выбирают SortMergeJoin</h2>"));
+  assert.ok(out.includes("Порог <code>spark.sql.autoBroadcastJoinThreshold</code> решает"));
+  assert.ok(
+    out.includes("будет ли <code>BroadcastHashJoin</code>. Иначе <code>SortMergeJoin</code>.</p>"),
+  );
+  assert.ok(out.includes('href="https://x.org/spark.sql.a_b">ShuffledHashJoin</a>'));
+  assert.ok(out.includes("<strong>SortMergeJoin</strong>"));
+  assert.ok(out.includes('df.groupBy("k").count()</pre>'));
+  assert.ok(out.includes("<!-- output run_job.py -->"));
+  assert.ok(out.includes("Вызовите <code>df.groupBy</code> и <code>count()</code>."));
+  assert.ok(out.includes("Сайт kafka-school.ru, DataFrame и PySpark остаются текстом."));
+  assert.equal(codeIdents(out), out);
+});
+
+test("normalizeArticle: code в таблице и перенос внутри него, повторный вызов стабилен", () => {
+  const html =
+    "<table><thead><tr><th>Стратегия</th><th>Параметр</th></tr></thead><tbody>" +
+    "<tr><td>BroadcastHashJoin</td><td>spark.sql.autoBroadcastJoinThreshold</td></tr></tbody></table>";
+  const out = normalizeArticle(html);
+  assert.ok(out.includes("<code>Broadcast<wbr>Hash<wbr>Join</code>"), out);
+  assert.ok(
+    out.includes("<code>spark.<wbr>sql.<wbr>auto<wbr>Broadcast<wbr>Join<wbr>Threshold</code>"),
+  );
+  assert.equal(normalizeArticle(out), out);
 });

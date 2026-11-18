@@ -90,7 +90,7 @@ class SatLint(unittest.TestCase):
     def test_defects_from_review_fail(self) -> None:
         bad = (good_html()
                .replace("<h2>Сравнение режимов</h2>", "<h2>Разбор: сравнение режимов</h2>")
-               .replace("журнал метаданных", "журнал <code>__cluster_metadata</code> — метаданных", 1)
+               .replace("журнал метаданных", "журнал <code>журнал __cluster_metadata</code> — метаданных", 1)
                .replace("&nbsp;\n<h2>Практика", "&nbsp;\n[cbanner code=KAFKA]\n\n&nbsp;\n<h2>Практика"))
         failed = set(run(bad)["failed_items"])
         self.assertTrue({"Двоеточия в заголовках", "Тег code", "Длинное тире",
@@ -116,6 +116,18 @@ class SatLint(unittest.TestCase):
         html = good_html().replace(
             "</p>", " Модель qwen2.5vl:7b отвечает за 12:30. Режимы такие:</p><ul><li>один</li><li>два</li></ul>", 1)
         self.assertEqual(run(html)["failed_items"], [])
+
+    def test_link_text_and_code_colons_are_allowed(self) -> None:
+        # Черновики kafka 659 и 699 (18.11): название курса и источника в ссылке, параметры SQL в тексте.
+        html = good_html().replace(
+            "</p>",
+            ' Разбираем на курсе <a href="https://kafka-school.ru/courses/x/">DEVKI: Apache Kafka</a>.'
+            ' Источник <a href="https://dev.to/x">Kafka consumers in production: ordering</a> полезен.'
+            " Агрегат вида UPDATE t SET a = a + :amount WHERE id = :id держит строку.</p>", 1)
+        self.assertEqual(run(html)["failed_items"], [])
+        # Двоеточие в прозе рядом со ссылкой по-прежнему считается.
+        bad = good_html().replace("</p>", ' Итог такой: <a href="https://x/">курс</a>.</p>', 1)
+        self.assertIn("Двоеточия в теле статьи", run(bad)["failed_items"])
 
     def test_post_title_is_checked(self) -> None:
         for title in ("Потеря кворума: разбор", "Потеря кворума — разбор", "Потеря кворума – разбор",
@@ -177,6 +189,33 @@ class ContentRules(unittest.TestCase):
     def test_r5_vertical_mermaid_fails(self) -> None:
         meta = META.replace("flowchart LR", "flowchart TD")
         self.assertIn("R5 Mermaid не вертикальный", run(good_html(), meta)["failed_items"])
+
+    def test_solution_summary_has_marker(self) -> None:
+        task = ("<p>Задание. Остановите два контроллера из трёх и проверьте запись.</p>\n"
+                "<details><summary>{}</summary><p>Запись остановится, чтение продолжится.</p></details>")
+        good = good_html().replace("<h2>Референсные", task.format(
+            "<strong>▶ Решение</strong> (нажмите, чтобы открыть)") + "\n&nbsp;\n<h2>Референсные")
+        self.assertNotIn("Кнопка «Решение» в заданиях", run(good)["failed_items"])
+        bad = good.replace("<summary><strong>▶ Решение</strong> (нажмите, чтобы открыть)</summary>",
+                           "<summary>Решение</summary>")
+        self.assertIn("Кнопка «Решение» в заданиях", run(bad)["failed_items"])
+
+    def test_table_compact(self) -> None:
+        self.assertNotIn("Таблицы компактные", run(good_html())["failed_items"])
+        wide = good_html().replace("<table><thead><tr>", "<table><thead><tr>" + "<th>x</th>" * 5, 1)
+        self.assertIn("Таблицы компактные", run(wide)["failed_items"])
+        long_cell = good_html().replace("<tbody><tr><td>", "<tbody><tr><td>" + "слово " * 20, 1)
+        self.assertIn("Таблицы компактные", run(long_cell)["failed_items"])
+
+    def test_code_only_around_identifier(self) -> None:
+        good = good_html().replace("журнал метаданных",
+                                   "журнал <code>__cluster_metadata</code> и <code>Sort<wbr>Merge<wbr>Join</code>", 1)
+        self.assertNotIn("Тег code", run(good)["failed_items"])
+        for inner in ("два слова", "журнал", "a<b>x</b>"):
+            bad = good_html().replace("журнал метаданных", f"журнал <code>{inner}</code>", 1)
+            self.assertIn("Тег code", run(bad)["failed_items"], inner)
+        attr = good_html().replace("журнал метаданных", '<code class="x">spark.sql.shuffle</code>', 1)
+        self.assertIn("Тег code", run(attr)["failed_items"])
 
 
 if __name__ == "__main__":

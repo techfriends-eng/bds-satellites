@@ -6,7 +6,7 @@ import type { GatesReport } from "../gates/run.ts";
 import { draftPaths } from "../generate/draft.ts";
 import type { Db } from "../store/db.ts";
 import { parseVisuals } from "@techfriends-eng/toolkit/visuals";
-import { solutionButtons, tableLayout } from "../article/html.ts";
+import { normalizeArticle } from "../article/html.ts";
 import { pickSlot } from "./slot.ts";
 
 /**
@@ -152,7 +152,7 @@ async function publishOnce(
   }
   // Уже созданные черновики (ToDo 102) получают новую кнопку при следующей публикации.
   const raw = readFileSync(paths.html, "utf8");
-  let html = tableLayout(solutionButtons(raw));
+  let html = normalizeArticle(raw);
   if (html !== raw) writeFileSync(paths.html, html);
   const meta = readFileSync(paths.meta, "utf8");
 

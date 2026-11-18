@@ -105,6 +105,75 @@ export function columnShares(rows: string[][]): number[] {
   return pct;
 }
 
+/**
+ * Идентификаторы в `<code>` (ToDo 104, решение автора 18.11). Плагин Encyclopedia Pro на сайтах
+ * подсвечивает термины и внутри имён: Join в SortMergeJoin, Shuffle в ShuffledHashJoin, Partition
+ * в spark.sql.adaptive.coalescePartitions. Внутри `<code>` он ссылок не ставит (0 на 475 постах трёх
+ * сайтов 18.11). Линтер профиля sat (`code_idents`) пускает `<code>` только вокруг одного имени.
+ * Имя: snake_case и `__dunder`, lowerCamel (`groupBy`, не `macOS`), CamelCase из трёх слов и длиннее
+ * (`SortMergeJoin`, не `ClickHouse`), точечное имя со строчной буквы или из трёх частей
+ * (`spark.sql.shuffle.partitions`, `producer.py`, не `Node.js` и не домен), вызов `count()`.
+ * Код, ссылки, заголовки, `<summary>` и `<strong>` не трогаем. Повторный вызов даёт тот же результат.
+ */
+const SKIP_IN = new Set([
+  "pre",
+  "code",
+  "a",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "summary",
+  "strong",
+  "b",
+  "script",
+  "style",
+]);
+const DOMAIN_END = /\.(?:ru|com|org|io|net|dev|ai|app|html?)$/;
+
+export function isIdent(w: string): boolean {
+  if (!/[A-Za-z]/.test(w)) return false;
+  if (/^[A-Za-z_]\w*\(\)$/.test(w)) return true;
+  if (/_/.test(w) && /^[A-Za-z_][\w.]*$/.test(w)) return true;
+  if (/^[a-z]+[A-Z][a-z]/.test(w) && /^[A-Za-z]\w*$/.test(w)) return true;
+  if (/^[A-Z]\w*$/.test(w) && (w.match(/[a-z][A-Z]/g)?.length ?? 0) >= 2) return true;
+  if (/^[A-Za-z]\w*(?:\.[A-Za-z]\w*)+(?:\(\))?$/.test(w) && !DOMAIN_END.test(w)) {
+    const parts = w.replace(/\(\)$/, "").split(".");
+    return /^[a-z]/.test(w) || parts.length >= 3 || parts.some((x) => /^[a-z]+[A-Z]/.test(x));
+  }
+  return false;
+}
+
+export function codeIdents(html: string): string {
+  const stack: string[] = [];
+  return html
+    .split(/(<!--[\s\S]*?-->|<[^>]+>)/)
+    .map((seg) => {
+      if (seg.startsWith("<")) {
+        const m = /^<(\/?)([a-zA-Z][\w-]*)/.exec(seg);
+        if (m && SKIP_IN.has(m[2].toLowerCase())) {
+          if (m[1]) {
+            const i = stack.lastIndexOf(m[2].toLowerCase());
+            if (i >= 0) stack.splice(i);
+          } else if (!seg.endsWith("/>")) stack.push(m[2].toLowerCase());
+        }
+        return seg;
+      }
+      if (stack.length) return seg;
+      return seg.replace(/(?<![\w./&#@-])[A-Za-z_][\w.]*(?:\(\))?(?<!\.)(?![\w(-])/g, (w) =>
+        isIdent(w) ? `<code>${w}</code>` : w,
+      );
+    })
+    .join("");
+}
+
+/** Всё, что черновик получает перед проверками и публикацией: кнопки решений, имена в code, таблицы. */
+export function normalizeArticle(html: string): string {
+  return tableLayout(codeIdents(solutionButtons(html)));
+}
+
 export function tableLayout(html: string): string {
   return html.replace(/<table>([\s\S]*?)<\/table>/g, (_m, body: string) => {
     const clean = body
