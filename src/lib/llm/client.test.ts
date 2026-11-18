@@ -9,7 +9,7 @@ import {
 import { parseSiteConfig } from "../config/site.ts";
 import { openState } from "../store/db.ts";
 import type { ClaudeCli } from "./claude-cli.ts";
-import { BudgetExceeded, createLlm, parseJson, Truncated } from "./client.ts";
+import { BudgetExceeded, createLlm, parseJson, Truncated, weekSpent } from "./client.ts";
 
 const cfg = parseSiteConfig(`
 site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}
@@ -78,6 +78,25 @@ llm: {models: {write: m}, maxCostPerRunUsd: 1, maxCostPerWeekUsd: 0.1}
   // Без weekBase (команды автора) потолок недели не действует.
   const free = createLlm(db, week, fakeChat([{}]).chat, undefined, undefined, null);
   assert.ok(!free.exhausted());
+});
+
+test("weekSpent: в потолок недели идут только такты, ручные команды — нет", async () => {
+  const db = openState(":memory:");
+  const tick = createLlm(db, cfg, fakeChat([{}]).chat, undefined, undefined, 0, "tick");
+  await tick.ask("write", "s", "u", 100);
+  const rework = createLlm(db, cfg, fakeChat([{}]).chat, undefined, undefined, null, "rework");
+  await rework.ask("write", "s", "u", 100);
+  const rows = db.prepare("SELECT command, cost_usd FROM llm_calls ORDER BY id").all() as {
+    command: string;
+    cost_usd: number;
+  }[];
+  assert.deepEqual(
+    rows.map((r) => r.command),
+    ["tick", "rework"],
+  );
+  assert.equal(weekSpent(db, "1970-01-01T00:00:00Z"), rows[0].cost_usd);
+  assert.ok(rows[0].cost_usd > 0);
+  assert.equal(weekSpent(db, "2999-01-01T00:00:00Z"), 0);
 });
 
 test("parseJson: код с ``` внутри строки, обёртка, текст вокруг", () => {

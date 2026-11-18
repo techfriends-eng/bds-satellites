@@ -57,6 +57,8 @@ const MIGRATIONS: string[] = [
      wp_post_id INTEGER NOT NULL UNIQUE,
      at TEXT NOT NULL
    )`,
+  // Потолок недели считает только расход прогонов по таймеру (run, tick); команды автора — нет.
+  "ALTER TABLE llm_calls ADD COLUMN command TEXT",
 ];
 
 export type Db = DatabaseSync;

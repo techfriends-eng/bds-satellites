@@ -14,7 +14,14 @@ import { align, aligned, finish, gate, rework, slugOf, type GateDeps } from "./g
 import { refreshSource, writeDraft, type Candidate } from "./generate/draft.ts";
 import { createJournal, type Journal, type Query } from "./journal/journal.ts";
 import { createClaudeCli } from "./llm/claude-cli.ts";
-import { BudgetExceeded, createLlm, OPENROUTER, parseModel } from "./llm/client.ts";
+import {
+  BudgetExceeded,
+  createLlm,
+  OPENROUTER,
+  parseModel,
+  TIMER_COMMANDS,
+  weekSpent,
+} from "./llm/client.ts";
 import { publishDraft } from "./publish/wp.ts";
 import { manualPath } from "./research/source.ts";
 import { pick, score } from "./select/rank.ts";
@@ -618,14 +625,10 @@ export async function main(argv: string[]): Promise<number> {
       ...process.env,
       CLAUDE_CODE_OAUTH_TOKEN: optionalSecret("CLAUDE_CODE_OAUTH_TOKEN") ?? undefined,
     }),
-    // Потолок недели — у прогонов по таймеру; команды автора над черновиками его не ждут.
-    command === "run" || command === "tick"
-      ? (
-          db
-            .prepare("SELECT COALESCE(SUM(cost_usd), 0) AS s FROM llm_calls WHERE at >= ?")
-            .get(week) as { s: number }
-        ).s
-      : null,
+    // Потолок недели — у прогонов по таймеру; команды автора над черновиками его не ждут
+    // и в расход тактов не входят.
+    (TIMER_COMMANDS as readonly string[]).includes(command) ? weekSpent(db, week) : null,
+    command,
   );
   const ctx: Ctx = {
     db,
