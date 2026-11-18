@@ -442,6 +442,9 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
         if ("held" in res) {
           const list = (ctx.journal.stats.live_held ??= []) as unknown[];
           list.push({ id: d.candidate_id, reason: res.held });
+        } else if ("gone" in res) {
+          const list = (ctx.journal.stats.wp_gone ??= []) as unknown[];
+          list.push({ id: d.candidate_id, reason: res.gone });
         } else if ("blocked" in res) {
           const list = (ctx.journal.stats.style_blocked ??= []) as unknown[];
           list.push({ id: d.candidate_id, items: res.blocked.map((b) => b.slice(0, 200)) });
