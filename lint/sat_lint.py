@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Форк: techfriends-eng/bds-content@c7768a6, lint/content_lint.py
+"""Форк: techfriends-eng/bds-content@e878ecc, lint/content_lint.py
 Общий линтер контента BDS с профилями wiki, blog и sat (bds-content ADR 0001, п. 2).
 
 Источник — techfriends-eng/bds-content, lint/content_lint.py. Проекты держат копию с шапкой форка
@@ -171,6 +171,9 @@ def body_colons(html: str) -> list[str]:
     Из счёта выпадает то, где двоеточие несёт служебную роль, а не связывает мысли:
     блоки кода, заголовки (у них своя проверка), таблицы, шорткоды и атрибуты тегов,
     ввод списка по правилу сэндвича и идентификаторы вида qwen2.5vl:7b.
+    Текст ссылок тоже не считается: там названия курсов и источников, их не переписать
+    (DEVKI: Apache Kafka для разработчиков). Двоеточие без пробела после — не знак препинания,
+    а часть кода в тексте (:amount в SQL, CONTROLLER:PLAINTEXT). Решение автора 2026-11-18.
     Возвращает куски текста вокруг каждого попавшего в счёт двоеточия.
     """
     body = strip_code(html)
@@ -180,11 +183,12 @@ def body_colons(html: str) -> list[str]:
     body = re.sub(r":\s*</p>\s*(?=<ul)", "</p>", body, flags=re.S)
     body = re.sub(r":\s*</li>", "</li>", body)
     body = re.sub(r"\[[a-z_]+[^\]]*\]", " ", body)      # шорткоды с url внутри
+    body = re.sub(r"<a\b[^>]*>.*?</a>", " ", body, flags=re.S)  # названия курсов и источников
     plain = re.sub(r"<[^>]+>", " ", body)                 # атрибуты тегов вместе с ними
     plain = plain.replace("&nbsp;", " ")
     plain = re.sub(r"(?<=\w):(?=\d)", " ", plain)         # qwen2.5vl:7b, 3:1, 12:30
     return [plain[max(0, m.start() - 55):m.start() + 25].strip()
-            for m in re.finditer(r":", plain)]
+            for m in re.finditer(r":(?=\s|$)", plain)]
 
 
 def sentences(html: str) -> list[str]:
