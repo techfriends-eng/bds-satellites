@@ -76,6 +76,24 @@ export function articleRow(db: Db, cfg: SiteConfig, candidateId: number): unknow
   ];
 }
 
+/**
+ * Строка учёта темы для недельного отчёта о браке (stack-radar, раздел «Спутники: брак и круги»):
+ * сколько правок `revise` прошла тема и почему снята. Колонок под это в sat.articles нет, поэтому
+ * учёт идёт в `sat.runs.stats.ledger`; отчёт берёт последнюю запись по теме.
+ */
+export function ledgerRow(
+  db: Db,
+  id: number,
+): { id: number; revisions: number; reason: string | null } {
+  const c = db.prepare("SELECT status, score_reason FROM candidates WHERE id = ?").get(id) as
+    | { status: string; score_reason: string | null }
+    | undefined;
+  const { n } = db
+    .prepare("SELECT count(*) AS n FROM llm_calls WHERE candidate_id = ? AND stage = 'revise'")
+    .get(id) as { n: number };
+  return { id, revisions: n, reason: c?.status === "rejected" ? (c.score_reason ?? null) : null };
+}
+
 export function createJournal(db: Db, cfg: SiteConfig, command: string) {
   const started = new Date();
   const touched = new Set<number>();
@@ -86,8 +104,9 @@ export function createJournal(db: Db, cfg: SiteConfig, command: string) {
     async close(query: Query | null, costUsd: number, error: string | null = null): Promise<void> {
       if (!query) return;
       try {
-        for (const id of [...touched].sort((a, b) => a - b))
-          await query(UPSERT, articleRow(db, cfg, id));
+        const ids = [...touched].sort((a, b) => a - b);
+        for (const id of ids) await query(UPSERT, articleRow(db, cfg, id));
+        if (ids.length) stats.ledger = ids.map((id) => ledgerRow(db, id));
         await query(
           "INSERT INTO sat.runs (site, started_at, finished_at, stats, cost_usd, error) VALUES ($1, $2, now(), $3, $4, $5)",
           [

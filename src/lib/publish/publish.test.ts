@@ -145,6 +145,7 @@ test("журнал: статьи и прогон одной серией зап�
   const sqls: string[] = [];
   await j.close(async (sql) => void sqls.push(sql.trim().split(/\s+/).slice(0, 3).join(" ")), 0.5);
   assert.deepEqual(sqls, ["INSERT INTO sat.articles", "INSERT INTO sat.runs"]);
+  assert.deepEqual(j.stats.ledger, [{ id: 5, revisions: 0, reason: null }]);
   await j.close(async () => {
     throw new Error("ECONNREFUSED");
   }, 0);

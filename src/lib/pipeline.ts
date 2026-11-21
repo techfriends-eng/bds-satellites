@@ -728,7 +728,13 @@ export async function main(argv: string[]): Promise<number> {
     },
   };
   if (command === "sync") {
-    for (const d of drafts(db, ACTIVE)) journal.touch(d.candidate_id);
+    // Все темы с черновиком и снятые: журнал и учёт правок (ledger) для недельного отчёта о браке.
+    const all = db
+      .prepare(
+        "SELECT id FROM candidates WHERE status = 'rejected' OR id IN (SELECT candidate_id FROM drafts)",
+      )
+      .all() as { id: number }[];
+    for (const r of all) journal.touch(r.id);
   }
   const error = await runSteps(steps, (step) => run[step](ctx), command);
   await llm.flush();
