@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { normalizeArticle, splitAnswer } from "../article/html.ts";
+import { leadTermsOf, normalizeArticle, splitAnswer } from "../article/html.ts";
 import type { SiteConfig } from "../config/site.ts";
 import { parseJson, Truncated, type Llm } from "../llm/client.ts";
 import { render } from "../prompts/render.ts";
@@ -185,7 +185,7 @@ export async function writeDraft(deps: DraftDeps, row: Candidate): Promise<strin
     throw err;
   }
   const { article, meta: metaMd } = splitAnswer(answer);
-  writeFileSync(paths.html, `${normalizeArticle(article)}\n`);
+  writeFileSync(paths.html, `${normalizeArticle(article, leadTermsOf(metaMd))}\n`);
   writeFileSync(paths.meta, `${metaMd}\n`);
   db.prepare("INSERT OR REPLACE INTO drafts (candidate_id, dir, created) VALUES (?, ?, ?)").run(
     row.id,

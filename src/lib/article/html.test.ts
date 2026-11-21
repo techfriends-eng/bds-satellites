@@ -6,6 +6,8 @@ import {
   clip,
   codeIdents,
   isIdent,
+  leadTerms,
+  leadTermsOf,
   normalizeArticle,
   parseArticle,
   SOLUTION_SUMMARY,
@@ -210,4 +212,35 @@ test("normalizeArticle: code в таблице и перенос внутри н
     out.includes("<code>spark.<wbr>sql.<wbr>auto<wbr>Broadcast<wbr>Join<wbr>Threshold</code>"),
   );
   assert.equal(normalizeArticle(out), out);
+});
+
+test("leadTermsOf: строка meta как у линтера, обратные кавычки снимаются", () => {
+  const meta =
+    "- **Slug:** x\n- **Главные термины:** Kafka log compaction, `dedupe buffer`, WarpStream\n";
+  assert.deepEqual(leadTermsOf(meta), ["Kafka log compaction", "dedupe buffer", "WarpStream"]);
+  assert.deepEqual(leadTermsOf("- **Slug:** x"), []);
+});
+
+test("leadTerms: термины лида жирным один раз, лишний жирный снят, повтор стабилен (kafka 553)", () => {
+  const html =
+    "&nbsp;\n<p><b>Важно.</b> Kafka log compaction в Kafka хранит последнее значение, у <code>dedupe buffer</code> " +
+    "и dedupe buffer по материалу WarpStream, снова Kafka log compaction.</p>\n<p>Kafka log compaction дальше.</p>";
+  const terms = ["Kafka", "Kafka log compaction", "dedupe buffer", "WarpStream", "нет в лиде"];
+  const out = leadTerms(html, terms);
+  assert.equal(
+    out,
+    "&nbsp;\n<p>Важно. <strong>Kafka log compaction</strong> в <strong>Kafka</strong> хранит последнее значение, у " +
+      "<code>dedupe buffer</code> и <strong>dedupe buffer</strong> по материалу <strong>WarpStream</strong>, снова " +
+      "Kafka log compaction.</p>\n<p>Kafka log compaction дальше.</p>",
+  );
+  assert.equal(leadTerms(out, terms), out);
+  assert.equal(normalizeArticle(out, terms), normalizeArticle(normalizeArticle(out, terms), terms));
+});
+
+test("leadTerms: термин только целым словом, регистр текста сохраняется", () => {
+  assert.equal(
+    leadTerms("<p>kafkaesque и kafka.</p>", ["Kafka"]),
+    "<p>kafkaesque и <strong>kafka</strong>.</p>",
+  );
+  assert.equal(leadTerms("<p>текст</p>", []), "<p>текст</p>");
 });

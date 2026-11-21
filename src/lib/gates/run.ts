@@ -2,11 +2,18 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { applyEdits, parseEdits, type Edit } from "../article/edits.ts";
-import { normalizeArticle, outputsOf, parseArticle, setOutputs } from "../article/html.ts";
+import {
+  leadTermsOf,
+  normalizeArticle,
+  outputsOf,
+  parseArticle,
+  setOutputs,
+} from "../article/html.ts";
 import { ARTICLE_MAX_TOKENS, draftPaths } from "../generate/draft.ts";
 import { parseJson } from "../llm/client.ts";
 import { render } from "../prompts/render.ts";
 import type { Style } from "../style/rules.ts";
+import type { Db } from "../store/db.ts";
 import { checkDraft, type StandDeps } from "../stand/check.ts";
 import { images, links, lint, sourceUse, uniqueness, type Check, type Head } from "./checks.ts";
 
@@ -75,7 +82,10 @@ export async function gate(deps: GateDeps, draft: Draft, slug: string): Promise<
   const paths = draftPaths(draft.dir, slug);
   // Правки revise и align и черновики до v0.1.40 могли оставить старую кнопку: чиним до линтера.
   const raw = readFileSync(paths.html, "utf8");
-  const html = normalizeArticle(raw);
+  const html = normalizeArticle(
+    raw,
+    existsSync(paths.meta) ? leadTermsOf(readFileSync(paths.meta, "utf8")) : [],
+  );
   if (html !== raw) writeFileSync(paths.html, html);
   const cand = db.prepare("SELECT url FROM candidates WHERE id = ?").get(draft.candidate_id) as {
     url: string;
@@ -316,9 +326,9 @@ function standOk(dir: string): boolean {
 }
 
 /** Переписывания черновика за все прогоны: без потолка gate_failed переписывался бы каждую неделю. */
-function revisionsDone(deps: GateDeps, id: number): number {
+export function revisionsDone(db: Db, id: number): number {
   return (
-    deps.db
+    db
       .prepare("SELECT count(*) AS n FROM llm_calls WHERE stage = 'revise' AND candidate_id = ?")
       .get(id) as { n: number }
   ).n;
@@ -337,7 +347,7 @@ export async function finish(deps: GateDeps, draft: Draft, slug: string): Promis
   for (
     let i = 0;
     i < deps.cfg.gates.maxRevisions &&
-    revisionsDone(deps, draft.candidate_id) < deps.cfg.gates.maxRevisionsTotal;
+    revisionsDone(deps.db, draft.candidate_id) < deps.cfg.gates.maxRevisionsTotal;
     i++
   ) {
     if (await reviseOnce(deps, draft, slug)) {

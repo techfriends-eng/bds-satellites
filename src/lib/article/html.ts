@@ -169,9 +169,65 @@ export function codeIdents(html: string): string {
     .join("");
 }
 
-/** Всё, что черновик получает перед проверками и публикацией: кнопки решений, имена в code, таблицы. */
-export function normalizeArticle(html: string): string {
-  return tableLayout(codeIdents(solutionButtons(html)));
+/** Строка meta «Главные термины» (content-rules R3) в том же разборе, что у линтера (R2). */
+export function leadTermsOf(meta: string): string[] {
+  const m = /^-\s*\*\*Главные термины:\*\*\s*(.+)$/m.exec(meta);
+  if (!m) return [];
+  return m[1]
+    .split(",")
+    .map((t) => t.trim().replace(/^`+|`+$/g, ""))
+    .filter(Boolean);
+}
+
+const LEAD = /<p>(?!&nbsp;<\/p>)([\s\S]*?)<\/p>/;
+const LEAD_SKIP = new Set(["code", "a", "strong", "b"]);
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Главные термины в лиде жирным (content-rules R2) ставит код, а не модель: kafka 553 ушла в WP без
+ * жирного, потому что статью написали до правила, а потолок правок был выбран (решение автора 21.11).
+ * Лид — первый `<p>`, как у линтера. Прежний `<strong>`/`<b>` в лиде снимается, затем первое вхождение
+ * каждого термина (без учёта регистра, целым словом, вне `<code>` и `<a>`) оборачивается в `<strong>`.
+ * Длинные термины раньше коротких: «Kafka log compaction» не съедается «Kafka». Термина нет в лиде —
+ * он не выделяется, провал R2 остаётся для revise. Повторный вызов даёт тот же результат.
+ */
+export function leadTerms(html: string, terms: string[]): string {
+  if (!terms.length) return html;
+  const m = LEAD.exec(html);
+  if (!m) return html;
+  let lead = m[1].replace(/<\/?(?:strong|b)>/g, "");
+  for (const term of [...terms].sort((a, b) => b.length - a.length)) {
+    const re = new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRe(term)}(?![\\p{L}\\p{N}_])`, "iu");
+    const stack: string[] = [];
+    let done = false;
+    lead = lead
+      .split(/(<[^>]+>)/)
+      .map((seg) => {
+        if (seg.startsWith("<")) {
+          const t = /^<(\/?)([a-zA-Z][\w-]*)/.exec(seg);
+          if (t && LEAD_SKIP.has(t[2].toLowerCase())) {
+            if (t[1]) stack.pop();
+            else stack.push(t[2].toLowerCase());
+          }
+          return seg;
+        }
+        if (done || stack.length) return seg;
+        return seg.replace(re, (w) => {
+          done = true;
+          return `<strong>${w}</strong>`;
+        });
+      })
+      .join("");
+  }
+  return `${html.slice(0, m.index)}<p>${lead}</p>${html.slice(m.index + m[0].length)}`;
+}
+
+/**
+ * Всё, что черновик получает перед проверками и публикацией: термины лида жирным (список из meta),
+ * кнопки решений, имена в code, таблицы.
+ */
+export function normalizeArticle(html: string, terms: string[] = []): string {
+  return tableLayout(codeIdents(solutionButtons(leadTerms(html, terms))));
 }
 
 export function tableLayout(html: string): string {

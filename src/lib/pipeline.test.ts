@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BudgetExceeded } from "./llm/client.ts";
-import { imageModels, RUN_STEPS, runSteps, tickSteps, type Step } from "./pipeline.ts";
+import { parseSiteConfig } from "./config/site.ts";
+import {
+  acceptLive,
+  dropExhausted,
+  imageModels,
+  RUN_STEPS,
+  runSteps,
+  tickSteps,
+  type Step,
+} from "./pipeline.ts";
+import { openState } from "./store/db.ts";
 
 async function play(failAt: Step, err: Error): Promise<{ done: Step[]; error: string | null }> {
   const done: Step[] = [];
@@ -74,4 +84,72 @@ test("tickSteps: новые темы только первым тактом не
     "visuals",
     "publish",
   ]);
+});
+
+test("потолок правок выбран, проверки не пройдены: тема снята, взята одна замена (ADR 0004)", () => {
+  const cfg = parseSiteConfig(`
+site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}
+sources:
+  - {id: aiven, kind: blog, url: "https://aiven/rss"}
+select: {keywords: [kafka], perRun: 2}
+gates: {maxRevisionsTotal: 2}
+`);
+  const db = openState(":memory:");
+  const ins = db.prepare(
+    `INSERT INTO candidates (url_hash, url, source_id, kind, title, summary, published, fetched_at, status,
+     score_relevance, score_depth) VALUES (?, ?, 'aiven', 'blog', 't', '', null, 'x', ?, 9, 9)`,
+  );
+  for (const [i, st] of ["gate_failed", "run_failed", "new", "new", "new"].entries())
+    ins.run(`h${i}`, `https://x/${i}`, st);
+  const revise = db.prepare(
+    "INSERT INTO llm_calls (at, stage, model, candidate_id) VALUES ('x', 'revise', 'm', ?)",
+  );
+  const ctx = { db, cfg, ids: undefined, journal: { stats: {} as Record<string, unknown> } };
+  const status = (id: number) =>
+    (db.prepare("SELECT status FROM candidates WHERE id = ?").get(id) as { status: string }).status;
+
+  revise.run(1);
+  dropExhausted(ctx, 1); // одна правка из двух: ещё не снята
+  assert.equal(status(1), "gate_failed");
+  revise.run(1);
+  revise.run(2);
+  revise.run(2);
+  dropExhausted(ctx, 2); // стенд не прошёл — не провал текста
+  assert.equal(status(2), "run_failed");
+  dropExhausted(ctx, 1);
+  assert.equal(status(1), "rejected");
+  const dropped = ctx.journal.stats.dropped as { id: number; replacement: number[] }[];
+  assert.equal(dropped.length, 1);
+  assert.equal(dropped[0].replacement.length, 1);
+  assert.equal(status(dropped[0].replacement[0]), "picked");
+});
+
+test("вышедший пост — тема принята: published, конвейер её не берёт; adopt без вышедшей версии идёт дальше", () => {
+  const db = openState(":memory:");
+  const ins = db.prepare(
+    `INSERT INTO candidates (url_hash, url, source_id, kind, title, summary, published, fetched_at, status)
+     VALUES (?, ?, 'aiven', 'blog', 't', '', null, 'x', ?)`,
+  );
+  const dr = db.prepare(
+    "INSERT INTO drafts (candidate_id, dir, created, wp_post_id, wp_status) VALUES (?, 'd', 'x', ?, ?)",
+  );
+  const rows: [string, number | null, string | null][] = [
+    ["gate_failed", 724, "publish"], // kafka 724: вышел, проверки не прошёл — всё равно принят
+    ["ready", 9300, "publish"],
+    ["ready", 9301, "future"],
+    ["picked", null, null],
+    ["drafted", 9185, null], // adopt: пост привязан, новая версия ещё не опубликована
+    ["rejected", 9209, "publish"],
+  ];
+  for (const [i, [st, post, wp]] of rows.entries()) {
+    ins.run(`h${i}`, `https://x/${i}`, st);
+    if (st !== "picked") dr.run(i + 1, post, wp);
+  }
+  assert.deepEqual(acceptLive(db), [1, 2]);
+  assert.deepEqual(acceptLive(db), []);
+  const st = db.prepare("SELECT status FROM candidates ORDER BY id").all() as { status: string }[];
+  assert.deepEqual(
+    st.map((r) => r.status),
+    ["published", "published", "ready", "picked", "drafted", "rejected"],
+  );
 });

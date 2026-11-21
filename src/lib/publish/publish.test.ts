@@ -214,41 +214,32 @@ test("публикация: метки из Keywords; seoMeta без mu-плаг
   );
 });
 
-test("опубликованный пост и провал проверок: текст на сайте не трогаем; черновик WP обновляется", async () => {
-  for (const [live, expectHeld] of [
-    ["publish", true],
-    ["draft", false],
-  ] as const) {
+test("провал проверок: в WP ничего не уходит, ни новый пост, ни обновление старого (ADR 0004)", async () => {
+  for (const postId of [null, 9185]) {
     const { db, dir } = setup();
     writeFileSync(
       join(dir, ".work", "gates.json"),
       JSON.stringify({ ok: false, checks: { lint: { ok: false, detail: "x" } }, review: [] }),
     );
-    db.prepare("UPDATE drafts SET wp_post_id = 9185 WHERE id = 1").run();
+    db.prepare("UPDATE drafts SET wp_post_id = ? WHERE id = 1").run(postId);
     const calls: string[] = [];
-    const wp = {
-      getEntryStatus: async (id: number) => ({ id, link: "l", slug: "s", status: live }),
-      uploadMedia: async (i: { filename: string }) => {
-        calls.push(`media ${i.filename}`);
-        return { id: 1, sourceUrl: `u/${i.filename}` };
+    const wp = new Proxy(
+      {},
+      {
+        get: (_t, name) => async () => {
+          calls.push(String(name));
+          throw new Error("WP не должен вызываться");
+        },
       },
-      updateEntry: async (id: number) => {
-        calls.push(`update ${id}`);
-        return { id, link: "l", slug: "s", status: live };
-      },
-    } as unknown as WpClient;
+    ) as unknown as WpClient;
     const draft = db.prepare("SELECT * FROM drafts WHERE id = 1").get() as never;
     const res = await publishDraft(
       { db, cfg, wp, creds: { username: "u", appPassword: "p" }, styleFailures: () => [] },
       draft,
       "s1",
     );
-    if (expectHeld) {
-      assert.ok("held" in res);
-      assert.deepEqual(calls, []);
-    } else {
-      assert.ok(calls.includes("update 9185"));
-    }
+    assert.ok("held" in res && res.held.includes("lint"));
+    assert.deepEqual(calls, []);
   }
 });
 
@@ -296,7 +287,7 @@ test("пост удалён в WP вручную: тема снята, пост 
   }
 });
 
-test("расписание: прошедший проверки черновик встаёт в future, проваленный остаётся черновиком", async () => {
+test("расписание: прошедший проверки черновик встаёт в future, проваленный в WP не уходит", async () => {
   const { db, dir } = setup();
   const calls: string[] = [];
   const wp = {
@@ -336,7 +327,7 @@ test("расписание: прошедший проверки черновик
   );
   const busy = { dates: null as string[] | null };
   const deps = { db, cfg: on, wp, creds, styleFailures: () => [], busy, now };
-  assert.equal(((await publishDraft(deps, draft(), "s1")) as { status: string }).status, "draft");
+  assert.ok("held" in (await publishDraft(deps, draft(), "s1")));
   assert.deepEqual(calls, []);
 
   writeFileSync(

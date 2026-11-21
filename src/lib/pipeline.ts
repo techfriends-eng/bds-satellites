@@ -10,7 +10,16 @@ import { loadSiteConfig, type SiteConfig } from "./config/site.ts";
 import { markBds, syncBds } from "./dedup/bds.ts";
 import { markRadar, TAKEN_SQL } from "./dedup/radar.ts";
 import { lint } from "./gates/checks.ts";
-import { align, aligned, finish, gate, rework, slugOf, type GateDeps } from "./gates/run.ts";
+import {
+  align,
+  aligned,
+  finish,
+  gate,
+  revisionsDone,
+  rework,
+  slugOf,
+  type GateDeps,
+} from "./gates/run.ts";
 import { refreshSource, writeDraft, type Candidate } from "./generate/draft.ts";
 import { createJournal, type Journal, type Query } from "./journal/journal.ts";
 import { createClaudeCli } from "./llm/claude-cli.ts";
@@ -167,6 +176,51 @@ function drafts(db: Db, statuses: string[], ids?: number[]) {
     status: string;
   }[];
   return ids?.length ? rows.filter((r) => ids.includes(r.candidate_id)) : rows;
+}
+
+/** Статусы темы, по которым конвейер ещё работает. */
+const ACTIVE = ["drafted", "ran", "run_failed", "gate_failed", "ready"];
+
+/**
+ * Пост вышел на сайте — статья принята автором (решение 21.11): тема переходит в конечный статус
+ * `published`. Её больше не проверяют, не правят, не обновляют в WP и не пишут о ней ошибок.
+ * Переделать вышедший пост — только явной командой `sat adopt`. Возвращает снятые с работы id.
+ */
+export function acceptLive(db: Db): number[] {
+  const rows = db
+    .prepare(
+      `SELECT c.id FROM candidates c JOIN drafts d ON d.candidate_id = c.id
+       WHERE d.wp_status = 'publish' AND c.status IN (${ACTIVE.map(() => "?").join(",")})`,
+    )
+    .all(...ACTIVE) as { id: number }[];
+  const set = db.prepare("UPDATE candidates SET status = 'published' WHERE id = ?");
+  for (const r of rows) set.run(r.id);
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Потолок правок выбран, а проверки не пройдены: тема снимается, вместо неё берётся следующая из пула
+ * (ADR 0004, решение автора 21.11). Без этого черновик висел в gate_failed и ждал рук автора. Пост в WP,
+ * если он остался с прошлых версий, не трогаем. Вернуть тему — `sat rework <id>`.
+ */
+export function dropExhausted(
+  ctx: Pick<Ctx, "db" | "cfg" | "ids"> & { journal: { stats: Record<string, unknown> } },
+  id: number,
+): void {
+  const { db, cfg } = ctx;
+  const { status } = db.prepare("SELECT status FROM candidates WHERE id = ?").get(id) as {
+    status: string;
+  };
+  if (status !== "gate_failed") return; // стенд не прошёл — это не провал текста
+  const done = revisionsDone(db, id);
+  if (done < cfg.gates.maxRevisionsTotal) return;
+  const reason = `проверки не пройдены за ${done} правок, тема снята`;
+  db.prepare("UPDATE candidates SET status = 'rejected', score_reason = ? WHERE id = ?").run(
+    reason,
+    id,
+  );
+  const list = (ctx.journal.stats.dropped ??= []) as unknown[];
+  list.push({ id, reason, replacement: ctx.ids?.length ? [] : pick(db, cfg, 1) });
 }
 
 function errorOf(ctx: Ctx, step: string, id: number, err: unknown): void {
@@ -334,7 +388,8 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
       ctx.journal.touch(d.candidate_id);
       dropStrayPreviews(d.dir);
       try {
-        await finish(ctx.gateDeps, d, slugOf(d.dir));
+        if (await finish(ctx.gateDeps, d, slugOf(d.dir))) continue;
+        dropExhausted(ctx, d.candidate_id);
       } catch (err) {
         errorOf(ctx, "revise", d.candidate_id, err);
       }
@@ -348,7 +403,7 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
     const base = JSON.parse(
       readFileSync(join(PKG, "visuals", "mermaid_theme_override.json"), "utf8"),
     ) as Record<string, unknown>;
-    for (const d of drafts(ctx.db, ["ready", "gate_failed"], ctx.ids)) {
+    for (const d of drafts(ctx.db, ["ready"], ctx.ids)) {
       const slug = slugOf(d.dir);
       dropStrayPreviews(d.dir);
       const { preview, schemes } = parseVisuals(
@@ -405,7 +460,12 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
     const row = ctx.db.prepare("SELECT id, url, summary, body FROM candidates WHERE id = ?");
     const list = (ctx.journal.stats.rework ??= []) as unknown[];
     const statusOf = ctx.db.prepare("SELECT status FROM candidates WHERE id = ?");
-    for (const d of drafts(ctx.db, ["ready", "gate_failed", "ran", "run_failed"], ctx.ids)) {
+    // rejected — тема, снятая после потолка правок (ADR 0004): автор возвращает её явным id.
+    for (const d of drafts(
+      ctx.db,
+      ["ready", "gate_failed", "ran", "run_failed", "rejected"],
+      ctx.ids,
+    )) {
       const slug = slugOf(d.dir);
       ctx.journal.touch(d.candidate_id);
       try {
@@ -462,16 +522,27 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
     const styleFailures = (dir: string, slug: string) =>
       lint(ctx.gateDeps.lintPy, dir, slug, ctx.cfg.domain, slug).style;
     const busy = { dates: null as string[] | null };
-    for (const d of drafts(ctx.db, ["ready", "gate_failed"], ctx.ids)) {
+    for (const d of drafts(ctx.db, ["ready"], ctx.ids)) {
       ctx.journal.touch(d.candidate_id);
       try {
+        // Пост в расписании мог выйти: вышедший не обновляем, тема принята (acceptLive).
+        if (d.wp_post_id && d.wp_status === "future") {
+          const now = await wp.getEntryStatus(d.wp_post_id, creds);
+          if (now.status === "publish") {
+            ctx.db
+              .prepare("UPDATE drafts SET wp_status = 'publish', wp_url = ? WHERE id = ?")
+              .run(now.link, d.id);
+            acceptLive(ctx.db);
+            continue;
+          }
+        }
         const res = await publishDraft(
           { db: ctx.db, cfg: ctx.cfg, wp, creds, styleFailures, busy },
           d,
           slugOf(d.dir),
         );
         if ("held" in res) {
-          const list = (ctx.journal.stats.live_held ??= []) as unknown[];
+          const list = (ctx.journal.stats.gate_held ??= []) as unknown[];
           list.push({ id: d.candidate_id, reason: res.held });
         } else if ("gone" in res) {
           const list = (ctx.journal.stats.wp_gone ??= []) as unknown[];
@@ -479,6 +550,8 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
         } else if ("blocked" in res) {
           const list = (ctx.journal.stats.style_blocked ??= []) as unknown[];
           list.push({ id: d.candidate_id, items: res.blocked.map((b) => b.slice(0, 200)) });
+        } else if (res.status === "publish") {
+          acceptLive(ctx.db);
         } else if (res.status === "future" && d.wp_status !== "future") {
           const list = (ctx.journal.stats.scheduled ??= []) as unknown[];
           list.push({ id: d.candidate_id, post: res.id });
@@ -567,6 +640,9 @@ export async function main(argv: string[]): Promise<number> {
   if (process.env.SAT_STAND_BASE) cfg.stand.base = process.env.SAT_STAND_BASE;
   const db = openState(join(stateDir, "state.db"));
   const journal = createJournal(db, cfg, command);
+  const accepted = acceptLive(db);
+  for (const id of accepted) journal.touch(id);
+  if (accepted.length) journal.stats.accepted = accepted;
   if (command === "ab-report") {
     console.log(formatAb(abReport(db)));
     return 0;
@@ -652,8 +728,7 @@ export async function main(argv: string[]): Promise<number> {
     },
   };
   if (command === "sync") {
-    for (const d of drafts(db, ["drafted", "ran", "run_failed", "gate_failed", "ready"]))
-      journal.touch(d.candidate_id);
+    for (const d of drafts(db, ACTIVE)) journal.touch(d.candidate_id);
   }
   const error = await runSteps(steps, (step) => run[step](ctx), command);
   await llm.flush();

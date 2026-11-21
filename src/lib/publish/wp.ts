@@ -6,16 +6,16 @@ import type { GatesReport } from "../gates/run.ts";
 import { draftPaths } from "../generate/draft.ts";
 import type { Db } from "../store/db.ts";
 import { parseVisuals } from "@techfriends-eng/toolkit/visuals";
-import { normalizeArticle } from "../article/html.ts";
+import { leadTermsOf, normalizeArticle } from "../article/html.ts";
 import { pickSlot } from "./slot.ts";
 
 /**
  * Статья в WordPress сайта через toolkit/wp. Пост создаётся черновиком. При publish.status future
  * черновик, прошедший все проверки, встаёт в расписание WP (ToDo 98, время — publish/slot.ts).
  * Картинки (схемы и превью) — в медиатеку, TODO_IMAGE заменяется адресом. Ссылки на курсы
- * получают UTM. Статья с другим провалом проверок уходит черновиком, причины — комментарием в начале.
- * Провал стиля (двоеточия, тире, заголовок и другие из STYLE_ITEMS линтера) не публикуется и не
- * обновляет уже созданный пост. Стиль проверяется заново: gates.json мог устареть с прошлого релиза.
+ * получают UTM. В WP уходит только статья, прошедшая все проверки (ADR 0004, решение автора 21.11):
+ * провал не создаёт пост и не обновляет уже созданный, тема дорабатывается или снимается конвейером.
+ * Стиль (STYLE_ITEMS линтера) проверяется заново: gates.json мог устареть с прошлого релиза.
  * Повторная публикация обновляет тот же пост (drafts.wp_post_id) и ставит обложку, если она появилась.
  */
 export function withUtm(html: string, domain: string, slug: string): string {
@@ -141,20 +141,19 @@ async function publishOnce(
   const report = existsSync(gatesFile)
     ? (JSON.parse(readFileSync(gatesFile, "utf8")) as GatesReport)
     : null;
-  // Опубликованный пост меняет только версия, прошедшая проверки (ToDo 97): провал остаётся
-  // в черновике на диске, читатель видит прежний текст.
-  if (draft.wp_post_id && !report?.ok) {
-    const live = await wp.getEntryStatus(draft.wp_post_id, creds);
-    if (live.status === "publish")
-      return {
-        held: `пост ${draft.wp_post_id} опубликован, проверки не пройдены: текст на сайте не трогаем`,
-      };
+  // В WP только версия, прошедшая проверки (ADR 0004): провал остаётся на диске, пост в WP —
+  // прежний или никакого.
+  if (!report?.ok) {
+    const failed = report
+      ? Object.keys(report.checks).filter((k) => !report.checks[k].ok)
+      : ["проверки не запускались"];
+    return { held: `проверки не пройдены (${failed.join(", ")}): в WP не уходит` };
   }
   // Уже созданные черновики (ToDo 102) получают новую кнопку при следующей публикации.
   const raw = readFileSync(paths.html, "utf8");
-  let html = normalizeArticle(raw);
-  if (html !== raw) writeFileSync(paths.html, html);
   const meta = readFileSync(paths.meta, "utf8");
+  let html = normalizeArticle(raw, leadTermsOf(meta));
+  if (html !== raw) writeFileSync(paths.html, html);
 
   const { preview, schemes } = parseVisuals(meta);
   // Загруженное помним: повторная публикация не плодит копии картинок в медиатеке.
