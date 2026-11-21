@@ -259,9 +259,10 @@ test("снятая тема: невышедший пост в корзину WP,
     trash: async (id) => {
       trashed.push(id);
     },
+    unschedule: async () => {},
   });
   assert.deepEqual(trashed, [1, 2]);
-  assert.deepEqual(got, [1, 2]);
+  assert.deepEqual(got, { trashed: [1, 2], denied: [] });
   const wp = db
     .prepare(
       "SELECT c.status, d.wp_status FROM candidates c JOIN drafts d ON d.candidate_id = c.id ORDER BY c.id",
@@ -279,4 +280,30 @@ test("снятая тема: невышедший пост в корзину WP,
       "gate_failed/draft",
     ],
   );
+});
+
+test("корзину не дала роль WP: пост из расписания снят в черновик, брак не выходит", async () => {
+  const db = openState(":memory:");
+  db.prepare(
+    `INSERT INTO candidates (url_hash, url, source_id, kind, title, summary, published, fetched_at, status)
+     VALUES ('h', 'https://x', 'aiven', 'blog', 't', '', null, 'x', 'rejected')`,
+  ).run();
+  db.prepare(
+    "INSERT INTO drafts (candidate_id, dir, created, wp_post_id, wp_status) VALUES (1, 'd', 'x', 9267, 'future')",
+  ).run();
+  const { WpError } = await import("@techfriends-eng/toolkit/wp");
+  const unscheduled: number[] = [];
+  const got = await trashRejected(db, {
+    status: async () => ({ status: "future", link: "l" }),
+    trash: async () => {
+      throw new WpError("DELETE", 403, '{"code":"rest_cannot_delete"}');
+    },
+    unschedule: async (id) => {
+      unscheduled.push(id);
+    },
+  });
+  assert.deepEqual(got, { trashed: [], denied: [1] });
+  assert.deepEqual(unscheduled, [9267]);
+  const row = db.prepare("SELECT wp_status FROM drafts").get() as { wp_status: string };
+  assert.equal(row.wp_status, "draft");
 });
