@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { readSecret } from "@techfriends-eng/toolkit/config";
 import { fetchText } from "@techfriends-eng/toolkit/ingest";
 import { createChat, createLedger } from "@techfriends-eng/toolkit/llm";
-import { createWp } from "@techfriends-eng/toolkit/wp";
+import { createWp, WpError } from "@techfriends-eng/toolkit/wp";
 import pg from "pg";
 import { loadSiteConfig, type SiteConfig } from "./config/site.ts";
 import { markBds, syncBds } from "./dedup/bds.ts";
@@ -31,7 +31,7 @@ import {
   TIMER_COMMANDS,
   weekSpent,
 } from "./llm/client.ts";
-import { postGone, publishDraft, trashPost } from "./publish/wp.ts";
+import { postGone, publishDraft, trashPost, unschedulePost } from "./publish/wp.ts";
 import { manualPath } from "./research/source.ts";
 import { pick, score } from "./select/rank.ts";
 import { prefilter } from "./select/prefilter.ts";
@@ -267,15 +267,26 @@ export function sweepExhausted(
 export type WpPostOps = {
   status: (postId: number) => Promise<{ status: string; link: string }>;
   trash: (postId: number) => Promise<void>;
+  /** Снять с расписания в черновик: запасной ход, когда корзину WP не даёт роль пользователя. */
+  unschedule: (postId: number) => Promise<void>;
 };
+
+/** WP не даёт роли удалить пост (author и пост в расписании, 21.11 kafka и spark): 403 rest_cannot_delete. */
+function deleteDenied(err: unknown): boolean {
+  return err instanceof WpError && err.status === 403 && err.message.includes("rest_cannot_delete");
+}
 
 /**
  * У автора в WP только два исхода темы: пост в расписании (или вышел) либо поста нет (решение 21.11).
  * Невышедший пост снятой темы (черновик, расписание, на проверке) уходит в корзину WP, оттуда автор
  * может его вернуть. Вышедший пост — статья принята автором: тема `published`, пост не трогаем.
- * Пост, удалённый вручную, отмечается `deleted`. Возвращает id тем, чьи посты ушли в корзину.
+ * Пост, удалённый вручную, отмечается `deleted`. Корзину не дала роль WP — пост из расписания
+ * снимается в черновик (брак не выходит), попытка корзины повторится следующим прогоном.
  */
-export async function trashRejected(db: Db, wp: WpPostOps): Promise<number[]> {
+export async function trashRejected(
+  db: Db,
+  wp: WpPostOps,
+): Promise<{ trashed: number[]; denied: number[] }> {
   const rows = db
     .prepare(
       `SELECT d.id, d.candidate_id, d.wp_post_id FROM drafts d JOIN candidates c ON c.id = d.candidate_id
@@ -287,6 +298,7 @@ export async function trashRejected(db: Db, wp: WpPostOps): Promise<number[]> {
     "UPDATE drafts SET wp_status = ?, wp_url = coalesce(?, wp_url) WHERE id = ?",
   );
   const trashed: number[] = [];
+  const denied: number[] = [];
   for (const r of rows) {
     try {
       const now = await wp.status(r.wp_post_id);
@@ -296,7 +308,15 @@ export async function trashRejected(db: Db, wp: WpPostOps): Promise<number[]> {
         continue;
       }
       if (now.status !== "trash") {
-        await wp.trash(r.wp_post_id);
+        try {
+          await wp.trash(r.wp_post_id);
+        } catch (err) {
+          if (!deleteDenied(err)) throw err;
+          if (now.status !== "draft") await wp.unschedule(r.wp_post_id);
+          setWp.run("draft", null, r.id);
+          denied.push(r.candidate_id);
+          continue;
+        }
         trashed.push(r.candidate_id);
       }
       setWp.run("trash", null, r.id);
@@ -308,7 +328,7 @@ export async function trashRejected(db: Db, wp: WpPostOps): Promise<number[]> {
       console.error(`корзина WP ${r.wp_post_id}: ${(err as Error).message.split("\n")[0]}`);
     }
   }
-  return trashed;
+  return { trashed, denied };
 }
 
 function errorOf(ctx: Ctx, step: string, id: number, err: unknown): void {
@@ -749,12 +769,15 @@ export async function main(argv: string[]): Promise<number> {
       const baseUrl = readSecret("WP_URL");
       const wp = createWp({ baseUrl });
       const creds = { username: readSecret("WP_USER"), appPassword: readSecret("WP_APP_PASSWORD") };
-      const trashed = await trashRejected(db, {
+      const { trashed, denied } = await trashRejected(db, {
         status: (id) => wp.getEntryStatus(id, creds),
         trash: (id) => trashPost(baseUrl, creds, id),
+        unschedule: (id) => unschedulePost(baseUrl, creds, id),
       });
-      for (const id of trashed) journal.touch(id);
+      for (const id of [...trashed, ...denied]) journal.touch(id);
       if (trashed.length) journal.stats.wp_trashed = trashed;
+      // Роль WP не даёт корзину: пост снят с расписания, удалить его может автор или админ сайта.
+      if (denied.length) journal.stats.wp_trash_denied = denied;
     }
   }
   if (command === "ab-report") {

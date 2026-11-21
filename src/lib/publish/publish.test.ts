@@ -7,7 +7,16 @@ import { WpError, type WpClient } from "@techfriends-eng/toolkit/wp";
 import { parseSiteConfig } from "../config/site.ts";
 import { articleRow, createJournal } from "../journal/journal.ts";
 import { openState } from "../store/db.ts";
-import { gateNote, postGone, publishDraft, seoOf, trashPost, withUtm, yoastMeta } from "./wp.ts";
+import {
+  gateNote,
+  postGone,
+  publishDraft,
+  seoOf,
+  trashPost,
+  unschedulePost,
+  withUtm,
+  yoastMeta,
+} from "./wp.ts";
 
 const cfg = parseSiteConfig(
   "site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}\nselect: {keywords: [kafka]}\npublish: {categories: [127]}\n",
@@ -370,4 +379,14 @@ test("корзина WP: DELETE без force, 410 «уже в корзине» �
     (err) => postGone(err),
   );
   await assert.rejects(trashPost("https://k", creds, 3, answer(403, "{}")), /403/);
+});
+
+test("снять с расписания: POST status=draft", async () => {
+  const seen: string[] = [];
+  const doFetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    seen.push(`${init?.method} ${String(url)} ${init?.body}`);
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  await unschedulePost("https://k", { username: "u", appPassword: "p" }, 9267, doFetch);
+  assert.deepEqual(seen, ['POST https://k/wp-json/wp/v2/posts/9267 {"status":"draft"}']);
 });

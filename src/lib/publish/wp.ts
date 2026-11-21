@@ -93,9 +93,30 @@ export function postGone(err: unknown): boolean {
   );
 }
 
+/** REST WP мимо toolkit/wp: корзины и смены статуса в нём нет. Ошибка — WpError, как у toolkit. */
+async function wpRest(
+  baseUrl: string,
+  creds: WpCredentials,
+  method: "DELETE" | "POST",
+  postId: number,
+  doFetch: typeof fetch,
+  body?: unknown,
+): Promise<Response> {
+  return doFetch(`${baseUrl.replace(/\/+$/, "")}/wp-json/wp/v2/posts/${postId}`, {
+    method,
+    headers: {
+      Accept: "application/json",
+      ...(body ? { "Content-Type": "application/json" } : {}),
+      Authorization: `Basic ${Buffer.from(`${creds.username}:${creds.appPassword}`).toString("base64")}`,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(20_000),
+  });
+}
+
 /**
- * Пост в корзину WP (REST DELETE без force): toolkit/wp этого не умеет. 410 `rest_already_trashed` —
- * уже в корзине, это не ошибка. 404 отдаётся как WpError, его ловит postGone.
+ * Пост в корзину WP (REST DELETE без force). 410 `rest_already_trashed` — уже в корзине, это не
+ * ошибка. 404 ловит postGone, 403 `rest_cannot_delete` — роль не даёт удалять (author и расписание).
  */
 export async function trashPost(
   baseUrl: string,
@@ -103,18 +124,22 @@ export async function trashPost(
   postId: number,
   doFetch: typeof fetch = fetch,
 ): Promise<void> {
-  const res = await doFetch(`${baseUrl.replace(/\/+$/, "")}/wp-json/wp/v2/posts/${postId}`, {
-    method: "DELETE",
-    headers: {
-      Accept: "application/json",
-      Authorization: `Basic ${Buffer.from(`${creds.username}:${creds.appPassword}`).toString("base64")}`,
-    },
-    signal: AbortSignal.timeout(20_000),
-  });
+  const res = await wpRest(baseUrl, creds, "DELETE", postId, doFetch);
   if (res.ok) return;
   const body = await res.text();
   if (res.status === 410 && body.includes("rest_already_trashed")) return;
   throw new WpError(`DELETE posts/${postId}`, res.status, body);
+}
+
+/** Пост из расписания (или на проверке) — в черновик: брак не выйдет по дате. */
+export async function unschedulePost(
+  baseUrl: string,
+  creds: WpCredentials,
+  postId: number,
+  doFetch: typeof fetch = fetch,
+): Promise<void> {
+  const res = await wpRest(baseUrl, creds, "POST", postId, doFetch, { status: "draft" });
+  if (!res.ok) throw new WpError(`POST posts/${postId} status=draft`, res.status, await res.text());
 }
 
 type PublishDeps = {
