@@ -52,13 +52,14 @@ export async function score(
 }
 
 /** Добирает темы до perRun с учётом незаконченных (picked, drafted) из прошлых запусков. */
-export function pick(db: Db, cfg: SiteConfig): number[] {
+/** `limit` — не больше стольких тем за вызов: замена снятой темы берёт одну (ADR 0004). */
+export function pick(db: Db, cfg: SiteConfig, limit = Infinity): number[] {
   const busy = (
     db
       .prepare("SELECT count(*) AS n FROM candidates WHERE status IN ('picked', 'drafted')")
       .get() as { n: number }
   ).n;
-  const room = cfg.select.perRun - busy;
+  const room = Math.min(cfg.select.perRun - busy, limit);
   if (room <= 0) return [];
   const ids = (
     db

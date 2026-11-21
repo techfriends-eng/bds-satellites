@@ -114,3 +114,13 @@ test("отбор: добор до perRun с учётом незаконченн�
   assert.equal(pick(db, cfg).length, 1);
   assert.deepEqual(pick(db, cfg), []);
 });
+
+test("отбор: замена снятой темы берёт не больше limit", async () => {
+  const { pick } = await import("./rank.ts");
+  const db = seed([
+    ["https://x/1", "aiven", "blog", "1", "", null],
+    ["https://x/2", "aiven", "blog", "2", "", null],
+  ]);
+  db.exec("UPDATE candidates SET score_relevance = 9, score_depth = 9");
+  assert.equal(pick(db, { ...cfg, select: { ...cfg.select, perRun: 2 } }, 1).length, 1);
+});
