@@ -199,6 +199,34 @@ export function acceptLive(db: Db): number[] {
 }
 
 /**
+ * Статус постов WP незакрытых тем — с сайта, а не из state.db: пост мог выйти по расписанию, его мог
+ * опубликовать автор руками, у темы из `sat adopt` статуса в базе нет вовсе (kafka 724, 21.11). Вышедший
+ * пост — тема принята (acceptLive). Сбой WP по одному посту не мешает остальным.
+ */
+export async function syncLive(
+  db: Db,
+  status: (postId: number) => Promise<{ status: string; link: string }>,
+): Promise<number[]> {
+  const rows = db
+    .prepare(
+      `SELECT d.id, d.wp_post_id FROM drafts d JOIN candidates c ON c.id = d.candidate_id
+       WHERE d.wp_post_id IS NOT NULL AND coalesce(d.wp_status, '') NOT IN ('publish', 'deleted')
+         AND c.status IN (${ACTIVE.map(() => "?").join(",")}) ORDER BY d.id`,
+    )
+    .all(...ACTIVE) as { id: number; wp_post_id: number }[];
+  const set = db.prepare("UPDATE drafts SET wp_status = 'publish', wp_url = ? WHERE id = ?");
+  for (const r of rows) {
+    try {
+      const now = await status(r.wp_post_id);
+      if (now.status === "publish") set.run(now.link, r.id);
+    } catch (err) {
+      console.error(`статус поста WP ${r.wp_post_id}: ${(err as Error).message.split("\n")[0]}`);
+    }
+  }
+  return acceptLive(db);
+}
+
+/**
  * Потолок правок выбран, а проверки не пройдены: тема снимается, вместо неё берётся следующая из пула
  * (ADR 0004, решение автора 21.11). Без этого черновик висел в gate_failed и ждал рук автора. Пост в WP,
  * если он остался с прошлых версий, не трогаем. Вернуть тему — `sat rework <id>`.
@@ -641,6 +669,11 @@ export async function main(argv: string[]): Promise<number> {
   const db = openState(join(stateDir, "state.db"));
   const journal = createJournal(db, cfg, command);
   const accepted = acceptLive(db);
+  if (optionalSecret("WP_URL")) {
+    const wp = createWp({ baseUrl: readSecret("WP_URL") });
+    const creds = { username: readSecret("WP_USER"), appPassword: readSecret("WP_APP_PASSWORD") };
+    accepted.push(...(await syncLive(db, (id) => wp.getEntryStatus(id, creds))));
+  }
   for (const id of accepted) journal.touch(id);
   if (accepted.length) journal.stats.accepted = accepted;
   if (command === "ab-report") {

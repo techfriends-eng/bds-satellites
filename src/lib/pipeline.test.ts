@@ -4,6 +4,7 @@ import { BudgetExceeded } from "./llm/client.ts";
 import { parseSiteConfig } from "./config/site.ts";
 import {
   acceptLive,
+  syncLive,
   dropExhausted,
   imageModels,
   RUN_STEPS,
@@ -151,5 +152,42 @@ test("вышедший пост — тема принята: published, конв
   assert.deepEqual(
     st.map((r) => r.status),
     ["published", "published", "ready", "picked", "drafted", "rejected"],
+  );
+});
+
+test("статус поста берётся с сайта: вышедший по расписанию, руками или из adopt — тема принята", async () => {
+  const db = openState(":memory:");
+  const ins = db.prepare(
+    `INSERT INTO candidates (url_hash, url, source_id, kind, title, summary, published, fetched_at, status)
+     VALUES (?, ?, 'aiven', 'blog', 't', '', null, 'x', ?)`,
+  );
+  const dr = db.prepare(
+    "INSERT INTO drafts (candidate_id, dir, created, wp_post_id, wp_status) VALUES (?, 'd', 'x', ?, ?)",
+  );
+  const rows: [string, number, string | null][] = [
+    ["gate_failed", 9185, null], // adopt, пост на сайте
+    ["ready", 9240, "future"], // вышел по расписанию
+    ["gate_failed", 9270, "draft"], // черновик, не вышел
+    ["gate_failed", 9999, "draft"], // WP ответил ошибкой
+  ];
+  for (const [i, [st, post, wp]] of rows.entries()) {
+    ins.run(`h${i}`, `https://x/${i}`, st);
+    dr.run(i + 1, post, wp);
+  }
+  const asked: number[] = [];
+  const log = console.error;
+  console.error = () => {};
+  const got = await syncLive(db, async (id) => {
+    asked.push(id);
+    if (id === 9999) throw new Error("500");
+    return { status: id === 9270 ? "draft" : "publish", link: `https://k/${id}` };
+  });
+  console.error = log;
+  assert.deepEqual(asked, [9185, 9240, 9270, 9999]);
+  assert.deepEqual(got, [1, 2]);
+  const st = db.prepare("SELECT status FROM candidates ORDER BY id").all() as { status: string }[];
+  assert.deepEqual(
+    st.map((r) => r.status),
+    ["published", "published", "gate_failed", "gate_failed"],
   );
 });
