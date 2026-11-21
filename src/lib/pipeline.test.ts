@@ -5,6 +5,8 @@ import { parseSiteConfig } from "./config/site.ts";
 import {
   acceptLive,
   syncLive,
+  sweepExhausted,
+  trashRejected,
   dropExhausted,
   imageModels,
   RUN_STEPS,
@@ -189,5 +191,92 @@ test("статус поста берётся с сайта: вышедший п�
   assert.deepEqual(
     st.map((r) => r.status),
     ["published", "published", "gate_failed", "gate_failed"],
+  );
+});
+
+test("такт снимает все темы с выбранным потолком, не только правленые в этом такте", () => {
+  const cfg = parseSiteConfig(`
+site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}
+sources:
+  - {id: aiven, kind: blog, url: "https://aiven/rss"}
+select: {keywords: [kafka], perRun: 2}
+gates: {maxRevisionsTotal: 2}
+`);
+  const db = openState(":memory:");
+  const ins = db.prepare(
+    `INSERT INTO candidates (url_hash, url, source_id, kind, title, summary, published, fetched_at, status,
+     score_relevance, score_depth) VALUES (?, ?, 'aiven', 'blog', 't', '', null, 'x', ?, 9, 9)`,
+  );
+  for (const [i, st] of ["gate_failed", "gate_failed", "new"].entries())
+    ins.run(`h${i}`, `https://x/${i}`, st);
+  db.prepare(
+    "INSERT INTO drafts (candidate_id, dir, created) VALUES (1, 'a', 'x'), (2, 'b', 'x')",
+  ).run();
+  const revise = db.prepare(
+    "INSERT INTO llm_calls (at, stage, model, candidate_id) VALUES ('x', 'revise', 'm', ?)",
+  );
+  for (const id of [1, 1, 1, 2]) revise.run(id); // 1 — сверх потолка (ручной rework), 2 — ещё нет
+  const journal = { stats: {} as Record<string, unknown> };
+  sweepExhausted({ db, cfg, ids: [], journal });
+  const st = db.prepare("SELECT status FROM candidates ORDER BY id").all() as { status: string }[];
+  assert.deepEqual(
+    st.map((r) => r.status),
+    ["rejected", "gate_failed", "picked"],
+  );
+});
+
+test("снятая тема: невышедший пост в корзину WP, вышедший принят, удалённый отмечен", async () => {
+  const db = openState(":memory:");
+  const ins = db.prepare(
+    `INSERT INTO candidates (url_hash, url, source_id, kind, title, summary, published, fetched_at, status)
+     VALUES (?, ?, 'aiven', 'blog', 't', '', null, 'x', ?)`,
+  );
+  const dr = db.prepare(
+    "INSERT INTO drafts (candidate_id, dir, created, wp_post_id, wp_status) VALUES (?, 'd', 'x', ?, ?)",
+  );
+  const rows: [string, number | null, string | null][] = [
+    ["rejected", 1, "draft"], // в корзину
+    ["rejected", 2, "future"], // в корзину: расписание с ошибками
+    ["rejected", 3, "future"], // вышел, пока висел: принят
+    ["rejected", 4, "draft"], // удалён вручную
+    ["rejected", 5, "deleted"], // уже отмечен: не спрашиваем
+    ["rejected", null, null], // поста нет
+    ["gate_failed", 7, "draft"], // тема в работе: не трогаем
+  ];
+  for (const [i, [st, post, wp]] of rows.entries()) {
+    ins.run(`h${i}`, `https://x/${i}`, st);
+    dr.run(i + 1, post, wp);
+  }
+  const trashed: number[] = [];
+  const got = await trashRejected(db, {
+    status: async (id) => {
+      if (id === 4) {
+        const { WpError } = await import("@techfriends-eng/toolkit/wp");
+        throw new WpError("GET", 404, '{"code":"rest_post_invalid_id"}');
+      }
+      return { status: id === 3 ? "publish" : "draft", link: `https://k/${id}` };
+    },
+    trash: async (id) => {
+      trashed.push(id);
+    },
+  });
+  assert.deepEqual(trashed, [1, 2]);
+  assert.deepEqual(got, [1, 2]);
+  const wp = db
+    .prepare(
+      "SELECT c.status, d.wp_status FROM candidates c JOIN drafts d ON d.candidate_id = c.id ORDER BY c.id",
+    )
+    .all() as { status: string; wp_status: string | null }[];
+  assert.deepEqual(
+    wp.map((r) => `${r.status}/${r.wp_status}`),
+    [
+      "rejected/trash",
+      "rejected/trash",
+      "published/publish",
+      "rejected/deleted",
+      "rejected/deleted",
+      "rejected/null",
+      "gate_failed/draft",
+    ],
   );
 });

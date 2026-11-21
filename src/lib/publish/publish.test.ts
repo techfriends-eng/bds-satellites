@@ -7,7 +7,7 @@ import { WpError, type WpClient } from "@techfriends-eng/toolkit/wp";
 import { parseSiteConfig } from "../config/site.ts";
 import { articleRow, createJournal } from "../journal/journal.ts";
 import { openState } from "../store/db.ts";
-import { gateNote, publishDraft, seoOf, withUtm, yoastMeta } from "./wp.ts";
+import { gateNote, postGone, publishDraft, seoOf, trashPost, withUtm, yoastMeta } from "./wp.ts";
 
 const cfg = parseSiteConfig(
   "site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}\nselect: {keywords: [kafka]}\npublish: {categories: [127]}\n",
@@ -352,4 +352,22 @@ test("конфиг: future без полосы — ошибка", () => {
   assert.throws(() => parseSiteConfig(`${base}publish: {status: future}\n`), /publish.lane/);
   assert.equal(parseSiteConfig(`${base}publish: {status: future, lane: 2}\n`).publish.lane, 2);
   assert.throws(() => parseSiteConfig(`${base}publish: {status: publish}\n`), /draft или future/);
+});
+
+test("корзина WP: DELETE без force, 410 «уже в корзине» не ошибка, 404 — пост удалён", async () => {
+  const seen: string[] = [];
+  const answer = (status: number, body: string) =>
+    (async (url: string | URL | Request, init?: RequestInit) => {
+      seen.push(`${init?.method} ${String(url)}`);
+      return new Response(body, { status });
+    }) as typeof fetch;
+  const creds = { username: "u", appPassword: "p" };
+  await trashPost("https://k/", creds, 9251, answer(200, '{"status":"trash"}'));
+  assert.deepEqual(seen, ["DELETE https://k/wp-json/wp/v2/posts/9251"]);
+  await trashPost("https://k", creds, 1, answer(410, '{"code":"rest_already_trashed"}'));
+  await assert.rejects(
+    trashPost("https://k", creds, 2, answer(404, '{"code":"rest_post_invalid_id"}')),
+    (err) => postGone(err),
+  );
+  await assert.rejects(trashPost("https://k", creds, 3, answer(403, "{}")), /403/);
 });

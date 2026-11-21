@@ -31,7 +31,7 @@ import {
   TIMER_COMMANDS,
   weekSpent,
 } from "./llm/client.ts";
-import { publishDraft } from "./publish/wp.ts";
+import { postGone, publishDraft, trashPost } from "./publish/wp.ts";
 import { manualPath } from "./research/source.ts";
 import { pick, score } from "./select/rank.ts";
 import { prefilter } from "./select/prefilter.ts";
@@ -122,6 +122,8 @@ type Ctx = {
   draftsDir: string;
   manualDir: string;
   ids?: number[];
+  /** `--force`: ручная доработка темы с выбранным потолком правок. Ставит только автор. */
+  force?: boolean;
   /** Превью, что не вышло в этом прогоне: второй проход visuals за него не платит. */
   previewFailed: Set<number>;
   stateDir: string;
@@ -229,7 +231,7 @@ export async function syncLive(
 /**
  * Потолок правок выбран, а проверки не пройдены: тема снимается, вместо неё берётся следующая из пула
  * (ADR 0004, решение автора 21.11). Без этого черновик висел в gate_failed и ждал рук автора. Пост в WP,
- * если он остался с прошлых версий, не трогаем. Вернуть тему — `sat rework <id>`.
+ * если он не вышел, убирает в корзину `trashRejected`. Вернуть тему — `sat rework <id> --force`.
  */
 export function dropExhausted(
   ctx: Pick<Ctx, "db" | "cfg" | "ids"> & { journal: { stats: Record<string, unknown> } },
@@ -249,6 +251,64 @@ export function dropExhausted(
   );
   const list = (ctx.journal.stats.dropped ??= []) as unknown[];
   list.push({ id, reason, replacement: ctx.ids?.length ? [] : pick(db, cfg, 1) });
+}
+
+/**
+ * Такт снимает все темы с выбранным потолком, а не только те, что правились в этом такте: правка у
+ * таких тем уже не идёт, и они висели в gate_failed (kafka «MirrorMaker 2 и перенос позиции
+ * консьюмера…», 6 правок при потолке 4, 21.11).
+ */
+export function sweepExhausted(
+  ctx: Pick<Ctx, "db" | "cfg" | "ids"> & { journal: { stats: Record<string, unknown> } },
+): void {
+  for (const d of drafts(ctx.db, ["gate_failed"])) dropExhausted(ctx, d.candidate_id);
+}
+
+export type WpPostOps = {
+  status: (postId: number) => Promise<{ status: string; link: string }>;
+  trash: (postId: number) => Promise<void>;
+};
+
+/**
+ * У автора в WP только два исхода темы: пост в расписании (или вышел) либо поста нет (решение 21.11).
+ * Невышедший пост снятой темы (черновик, расписание, на проверке) уходит в корзину WP, оттуда автор
+ * может его вернуть. Вышедший пост — статья принята автором: тема `published`, пост не трогаем.
+ * Пост, удалённый вручную, отмечается `deleted`. Возвращает id тем, чьи посты ушли в корзину.
+ */
+export async function trashRejected(db: Db, wp: WpPostOps): Promise<number[]> {
+  const rows = db
+    .prepare(
+      `SELECT d.id, d.candidate_id, d.wp_post_id FROM drafts d JOIN candidates c ON c.id = d.candidate_id
+       WHERE c.status = 'rejected' AND d.wp_post_id IS NOT NULL
+         AND coalesce(d.wp_status, '') NOT IN ('deleted', 'trash', 'publish') ORDER BY d.id`,
+    )
+    .all() as { id: number; candidate_id: number; wp_post_id: number }[];
+  const setWp = db.prepare(
+    "UPDATE drafts SET wp_status = ?, wp_url = coalesce(?, wp_url) WHERE id = ?",
+  );
+  const trashed: number[] = [];
+  for (const r of rows) {
+    try {
+      const now = await wp.status(r.wp_post_id);
+      if (now.status === "publish") {
+        setWp.run("publish", now.link, r.id);
+        db.prepare("UPDATE candidates SET status = 'published' WHERE id = ?").run(r.candidate_id);
+        continue;
+      }
+      if (now.status !== "trash") {
+        await wp.trash(r.wp_post_id);
+        trashed.push(r.candidate_id);
+      }
+      setWp.run("trash", null, r.id);
+    } catch (err) {
+      if (postGone(err)) {
+        setWp.run("deleted", null, r.id);
+        continue;
+      }
+      console.error(`корзина WP ${r.wp_post_id}: ${(err as Error).message.split("\n")[0]}`);
+    }
+  }
+  return trashed;
 }
 
 function errorOf(ctx: Ctx, step: string, id: number, err: unknown): void {
@@ -496,6 +556,13 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
     )) {
       const slug = slugOf(d.dir);
       ctx.journal.touch(d.candidate_id);
+      // Потолок выбран — ручная доработка только по слову автора (21.11: две лишние правки ушли
+      // на тему, которую текстом не спасти).
+      const done = revisionsDone(ctx.db, d.candidate_id);
+      if (done >= ctx.cfg.gates.maxRevisionsTotal && !ctx.force) {
+        list.push({ id: d.candidate_id, refused: `правок ${done}, потолок выбран; нужен --force` });
+        continue;
+      }
       try {
         const cand = row.get(d.candidate_id) as Candidate;
         const src = await refreshSource(
@@ -676,6 +743,20 @@ export async function main(argv: string[]): Promise<number> {
   }
   for (const id of accepted) journal.touch(id);
   if (accepted.length) journal.stats.accepted = accepted;
+  if ((TIMER_COMMANDS as readonly string[]).includes(command) || command === "sync") {
+    sweepExhausted({ db, cfg, ids: [], journal });
+    if (optionalSecret("WP_URL")) {
+      const baseUrl = readSecret("WP_URL");
+      const wp = createWp({ baseUrl });
+      const creds = { username: readSecret("WP_USER"), appPassword: readSecret("WP_APP_PASSWORD") };
+      const trashed = await trashRejected(db, {
+        status: (id) => wp.getEntryStatus(id, creds),
+        trash: (id) => trashPost(baseUrl, creds, id),
+      });
+      for (const id of trashed) journal.touch(id);
+      if (trashed.length) journal.stats.wp_trashed = trashed;
+    }
+  }
   if (command === "ab-report") {
     console.log(formatAb(abReport(db)));
     return 0;
@@ -744,6 +825,7 @@ export async function main(argv: string[]): Promise<number> {
     cfg,
     journal,
     ids,
+    force: rest.includes("--force"),
     stateDir,
     advanced: command === "tick" ? new Set() : null,
     draftsDir: join(stateDir, "drafts"),

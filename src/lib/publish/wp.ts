@@ -93,6 +93,30 @@ export function postGone(err: unknown): boolean {
   );
 }
 
+/**
+ * Пост в корзину WP (REST DELETE без force): toolkit/wp этого не умеет. 410 `rest_already_trashed` —
+ * уже в корзине, это не ошибка. 404 отдаётся как WpError, его ловит postGone.
+ */
+export async function trashPost(
+  baseUrl: string,
+  creds: WpCredentials,
+  postId: number,
+  doFetch: typeof fetch = fetch,
+): Promise<void> {
+  const res = await doFetch(`${baseUrl.replace(/\/+$/, "")}/wp-json/wp/v2/posts/${postId}`, {
+    method: "DELETE",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Basic ${Buffer.from(`${creds.username}:${creds.appPassword}`).toString("base64")}`,
+    },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (res.ok) return;
+  const body = await res.text();
+  if (res.status === 410 && body.includes("rest_already_trashed")) return;
+  throw new WpError(`DELETE posts/${postId}`, res.status, body);
+}
+
 type PublishDeps = {
   db: Db;
   cfg: SiteConfig;
