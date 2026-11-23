@@ -9,6 +9,7 @@ import pg from "pg";
 import { loadSiteConfig, type SiteConfig } from "./config/site.ts";
 import { markBds, syncBds } from "./dedup/bds.ts";
 import { markRadar, TAKEN_SQL } from "./dedup/radar.ts";
+import { syncBdsOffers } from "./dedup/offers.ts";
 import { lint } from "./gates/checks.ts";
 import {
   align,
@@ -397,6 +398,17 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
   },
   async select(ctx) {
     await score(ctx.db, ctx.cfg, ctx.gateDeps.llm, join(PKG, "prompts"));
+    // ADR 0005: лучшие сначала предлагаются BDS. База недоступна — без добора тем: иначе лучшее
+    // ушло бы в черновик спутника мимо BDS. Следующий отбор повторит.
+    const sat = await pgQuery(optionalSecret("SAT_DB_URL"));
+    if (sat) {
+      try {
+        ctx.journal.stats.bds_offers = await syncBdsOffers(ctx.db, ctx.cfg, sat);
+      } catch (err) {
+        ctx.journal.stats.bds_offers_error = (err as Error).message.slice(0, 200);
+        return;
+      }
+    }
     ctx.journal.stats.picked = pick(ctx.db, ctx.cfg);
     writeFileSync(join(ctx.stateDir, SELECTED_AT), nowIso());
   },

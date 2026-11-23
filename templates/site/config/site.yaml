@@ -19,6 +19,10 @@ select:
   minRelevance: 7
   minDepth: 6
   maxFetches: 4
+  # ADR 0005: от этих оценок кандидат сначала предлагается bigdataschool.ru (sat.bds_offers, карточка Stack Radar).
+  bdsMinRelevance: 9
+  bdsMinDepth: 7
+  bdsPerRun: 3
 
 llm:
   # Модель — строкой или списком с откатом по порядку: openrouter:<id> (или просто id), claude-cli:<alias>

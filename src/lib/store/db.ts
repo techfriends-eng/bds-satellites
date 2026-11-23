@@ -27,7 +27,7 @@ const MIGRATIONS: string[] = [
      score_depth INTEGER,
      score_reason TEXT,
      scored_at TEXT,
-     status TEXT NOT NULL DEFAULT 'new'  -- new dup bds radar skip picked unreadable rejected drafted ran run_failed gate_failed ready
+     status TEXT NOT NULL DEFAULT 'new'  -- new dup bds radar bds_offer skip picked unreadable rejected drafted ran run_failed gate_failed ready
    );
    CREATE INDEX candidates_status ON candidates(status);
    CREATE TABLE feed_runs (

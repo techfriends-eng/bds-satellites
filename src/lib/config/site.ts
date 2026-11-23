@@ -40,6 +40,11 @@ export type SiteConfig = {
     minRelevance: number;
     minDepth: number;
     maxFetches: number;
+    /** ADR 0005: от этих оценок кандидат сначала предлагается bigdataschool.ru (sat.bds_offers). */
+    bdsMinRelevance: number;
+    bdsMinDepth: number;
+    /** Новых предложений BDS за отбор; остальные ждут в очереди (статус bds_offer). */
+    bdsPerRun: number;
   };
   llm: {
     /** Список моделей этапа с откатом по порядку (ADR 0002); в YAML можно строкой — список из одной. */
@@ -215,6 +220,9 @@ export function parseSiteConfig(text: string): SiteConfig {
     minRelevance: 7,
     minDepth: 6,
     maxFetches: 4,
+    bdsMinRelevance: 9,
+    bdsMinDepth: 7,
+    bdsPerRun: 3,
   });
   // Пустой список ключей пропустил бы весь пул: это ошибка конфига, а не «без фильтра».
   if (select.keywords.length === 0) throw new Error("select.keywords пуст");
