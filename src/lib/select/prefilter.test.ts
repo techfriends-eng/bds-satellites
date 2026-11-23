@@ -124,3 +124,35 @@ test("отбор: замена снятой темы берёт не больш�
   db.exec("UPDATE candidates SET score_relevance = 9, score_depth = 9");
   assert.equal(pick(db, { ...cfg, select: { ...cfg.select, perRun: 2 } }, 1).length, 1);
 });
+
+test("видео: Shorts и организационные ролики отсеяны, доклад прошёл", () => {
+  const yt = parseSiteConfig(`
+site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}
+sources:
+  - {id: yt, kind: youtube, topical: true, channel_id: UC1}
+select: {keywords: [kafka]}
+`);
+  const d = "2026-10-01T00:00:00Z";
+  const v = (id: string, title: string): [string, string, string, string, string, string] => [
+    `https://www.youtube.com/watch?v=${id}`,
+    "yt",
+    "youtube",
+    title,
+    "",
+    d,
+  ];
+  const db = seed([
+    ["https://www.youtube.com/shorts/abc", "yt", "youtube", "Kafka in 60s", "", d],
+    v("a1", "Delta Lake Community Meetup [December 2026]"),
+    v("a2", "Community Sync for Iceberg Go"),
+    v("a3", "Trino contributor call 2026 10 28"),
+    v("a4", "Aiven Studio Live Stream | Day 2"),
+    v("a5", "A Conversation with Vercel | EuroPython 2026 Platinum Sponsor"),
+    v("a6", "Fiverr Webinar recording"),
+    v("a7", "Kafka Night Moscow"),
+    v("a8", "Митап Kafka в Москве"),
+    v("ok", "The traps of migrating Kafka from Zookeeper to KRaft"),
+  ]);
+  const counts = prefilter(db, yt, new Date("2026-10-28T00:00:00Z"));
+  assert.deepEqual(counts, { shorts: 1, org_video: 8, pass: 1 });
+});

@@ -9,6 +9,7 @@ topics: []
 courses: []
 
 # kind: blog | release | aggregator | youtube; topical — лента целиком по теме; enabled: false — выключен.
+# youtube: { id: yt-<канал>, kind: youtube, title: ..., channel_id: UC... }; Shorts и митапы отсеет предотбор.
 sources: []
 
 select:
