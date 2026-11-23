@@ -334,3 +334,33 @@ test("видео: текст из кэша за второй раз не пла�
   await read(url);
   assert.equal(full.asked.length, 1);
 });
+
+test("черновик: платная статья Medium — skip medium_paywall, автору не пишем", async () => {
+  const db = seed();
+  db.exec(
+    "UPDATE candidates SET url = 'https://medium.com/@turtle/kafka-streams-recover-3c6ef658ebfc' WHERE id = 13",
+  );
+  const dir = mkdtempSync(join(tmpdir(), "sat-"));
+  const { llm, asked } = fakeLlm({});
+  const out = await writeDraft(
+    {
+      db,
+      cfg,
+      llm,
+      style: loadStyle(join(ROOT, "style")),
+      promptDirs: [join(ROOT, "prompts")],
+      draftsDir: dir,
+      manualDir: join(dir, "source-text"),
+      getHtml: async (u) => Promise.reject(new Error(`HTTP 403 ${u}`)),
+    },
+    db.prepare("SELECT * FROM candidates WHERE id = 13").get() as never,
+  );
+  assert.equal(out, null);
+  assert.equal(asked.length, 0);
+  const row = db.prepare("SELECT status, skip_reason FROM candidates WHERE id = 13").get() as {
+    status: string;
+    skip_reason: string;
+  };
+  assert.equal(row.status, "skip");
+  assert.match(row.skip_reason, /^medium_paywall/);
+});
