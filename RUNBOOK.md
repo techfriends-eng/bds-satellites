@@ -83,7 +83,16 @@ supan8n недоступен — план и статья идут без фра
 зря — поправить список слов, релиз пакета.
 
 - `state.db` сайта (SQLite, `node:sqlite`): миграции в `src/lib/state/db.ts`, только добавление.
-- База `sat` на auto08: `sat.articles`, `sat.runs`. Хаб читает через FDW на supan8n.
+- База `sat` на auto08: `sat.articles`, `sat.runs`, `sat.bds_offers`. Хаб читает через FDW на supan8n.
+
+Предложения BDS (ADR 0005, с 0.1.56): отбор после оценки отдаёт кандидатов от `select.bdsMinRelevance` /
+`bdsMinDepth` (9/7) в `sat.bds_offers` (статус кандидата `bds_offer`), карточку с кнопками шлёт Stack Radar
+(RUNBOOK stack-radar §8, трек «Лонгрид BDS»). Решения сверяются в начале каждого отбора: `approved` —
+`radar`, `rejected`/`expired` и не показанное за 14 дней — `new`. Счётчики — `sat.runs.stats.bds_offers`
+(`offered`, `queued`, `pending`, `bds`, `returned`), сбой базы — `stats.bds_offers_error` (темы в этот отбор
+не добираются). Таблицу и роль `sat_radar` ставит `ops/bds_offers_setup.sh` (автор, с wsa100). Очередь:
+`sudo -u postgres psql -d sat -c "select id, site, status, score_relevance, score_depth, left(title,60) from sat.bds_offers order by offered_at desc limit 20"`.
+Вернуть предложение спутнику руками: `update sat.bds_offers set status = 'rejected', decided_at = now() where id = …`.
 
 ## 6. Деплой
 
