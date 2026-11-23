@@ -214,6 +214,11 @@ test("конфиг: модель строкой — список из одной
     () => parseSiteConfig(multi_yaml("image: [claude-cli:sonnet]")),
     /только OpenRouter/,
   );
+  assert.throws(
+    () => parseSiteConfig(multi_yaml("video: [claude-cli:sonnet]")),
+    /llm.models.video: только OpenRouter/,
+  );
+  assert.deepEqual(multi.llm.models.video, ["google/gemini-2.5-flash"]);
 });
 
 function multi_yaml(models: string) {

@@ -186,7 +186,7 @@ test("правка: потерянная пометка вывода — пов�
   const d = deps(db, {});
   const answers = [lost, good];
   d.llm.ask = async (_stage, _system, user) => {
-    users.push(user);
+    users.push(String(user));
     return answers.shift() ?? lost;
   };
   assert.equal(await reviseOnce(d, { candidate_id: 5, dir }, "s1"), false);
@@ -212,7 +212,7 @@ test("правка: фрагмент не найден дословно — по
   const users: string[] = [];
   const d = deps(db, {});
   const answers = [miss, "=====ARTICLE=====\n<p>b</p>"];
-  d.llm.ask = async (_stage, _system, user) => (users.push(user), answers.shift() ?? miss);
+  d.llm.ask = async (_stage, _system, user) => (users.push(String(user)), answers.shift() ?? miss);
   await assert.rejects(reviseOnce(d, { candidate_id: 5, dir }, "s1"), /нет пар/);
   assert.match(users[1], /фрагмента нет в статье дословно/);
   assert.equal(readFileSync(join(dir, "s1.html"), "utf8"), html);
@@ -290,7 +290,7 @@ test("переделка: правка идёт и при чистых пров�
     flush: async () => {},
     ask: async (stage, _system, user) => {
       if (stage !== "revise") return '{"issues": []}';
-      prompts.push(user);
+      prompts.push(String(user));
       const n = prompts.length; // каждый круг правит то, что оставил прошлый
       return `=====FIND ARTICLE=====\nлид${"!".repeat(n - 1)} <a\n=====REPLACE=====\nлид${"!".repeat(n)} <a`;
     },

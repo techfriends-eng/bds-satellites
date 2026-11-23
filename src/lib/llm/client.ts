@@ -1,4 +1,4 @@
-import type { ChatClient, Ledger } from "@techfriends-eng/toolkit/llm";
+import type { ChatClient, ChatContentPart, Ledger } from "@techfriends-eng/toolkit/llm";
 import type { SiteConfig } from "../config/site.ts";
 import { nowIso, type Db } from "../store/db.ts";
 import type { ClaudeCli } from "./claude-cli.ts";
@@ -43,7 +43,8 @@ export type Llm = {
   ask(
     stage: Stage,
     system: string,
-    user: string,
+    /** Текст или части сообщения (видео — только OpenRouter, у `claude-cli:` отказ и откат). */
+    user: string | ChatContentPart[],
     maxTokens: number,
     candidateId?: number,
   ): Promise<string>;
@@ -165,7 +166,7 @@ export function createLlm(
     model: string,
     stage: Stage,
     system: string,
-    user: string,
+    user: string | ChatContentPart[],
     maxTokens: number,
     candidateId: number | undefined,
     variant: string | null,
@@ -213,11 +214,12 @@ export function createLlm(
     alias: string,
     stage: Stage,
     system: string,
-    user: string,
+    user: string | ChatContentPart[],
     candidateId: number | undefined,
     variant: string | null,
   ): Promise<string> {
     if (!cli) throw new Error("бэкенд claude-cli не подключён");
+    if (typeof user !== "string") throw new Error("claude-cli принимает только текст");
     const gate = await cli.allowed();
     if (!gate.ok) throw new Error(gate.why);
     const effort = cfg.llm.reasoning[stage]?.effort;

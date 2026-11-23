@@ -90,7 +90,7 @@ test("прогон: упал → починка через LLM меняет ко
     flush: async () => {},
     ask: async (stage, _s, user) => {
       assert.equal(stage, "fix");
-      assert.match(user, /boom/);
+      assert.match(String(user), /boom/);
       return JSON.stringify({
         cause: "exit 1",
         files: { "run.sh": "# run.sh · Kafka 4.3.2\necho ok\n" },

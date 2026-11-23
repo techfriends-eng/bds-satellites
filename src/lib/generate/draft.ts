@@ -6,7 +6,13 @@ import { parseJson, Truncated, type Llm } from "../llm/client.ts";
 import { render } from "../prompts/render.ts";
 import { docsForPlan } from "../docs/search.ts";
 import { createFetcher, docUrlAllowed, formatLog, type GetHtml } from "../research/fetcher.ts";
-import { manualPath, MIN_SOURCE_WORDS, readSource, wordCount } from "../research/source.ts";
+import {
+  manualPath,
+  MIN_SOURCE_WORDS,
+  readSource,
+  wordCount,
+  youtubeId,
+} from "../research/source.ts";
 import { nowIso, type Db } from "../store/db.ts";
 import type { Style } from "../style/rules.ts";
 import { adoptedPost } from "../sources/adopt.ts";
@@ -20,6 +26,8 @@ export const DOC_LIMIT = 30_000;
 // Статья целиком с кодом: рассуждение Sonnet 5.5 на effort medium съедало до 21k из 40k, и статья
 // с большим примером обрывалась (python 1611). Потолок модели — 128k.
 export const ARTICLE_MAX_TOKENS = 64_000;
+// Час доклада — около 10 тыс. слов с кодом с экрана; у Gemini 2.5 рассуждение входит в тот же потолок.
+export const VIDEO_MAX_TOKENS = 32_000;
 
 export type Plan = {
   verdict: "take" | "skip";
@@ -70,6 +78,45 @@ export function draftPaths(dir: string, slug: string) {
   };
 }
 
+/**
+ * Текст исходника по видео YouTube: модель этапа video смотрит его по ссылке (ADR 0002 §4).
+ * Ответ кладётся в <drafts>/.video/<id видео>.md: доработка темы и повтор после сбоя за видео не платят.
+ * Обрезанный по потолку ответ оплачен и годится как начало видео — берём его.
+ */
+export function videoReader(
+  deps: Pick<DraftDeps, "cfg" | "llm" | "promptDirs" | "draftsDir">,
+  candidateId: number,
+): (url: string) => Promise<string> {
+  return async (url) => {
+    const id = youtubeId(url);
+    if (!id) throw new Error(`не видео YouTube: ${url}`);
+    const path = join(deps.draftsDir, ".video", `${id}.md`);
+    if (existsSync(path)) return readFileSync(path, "utf8");
+    const p = render(deps.promptDirs, "video", deps.cfg, { url });
+    let text: string;
+    try {
+      text = await deps.llm.ask(
+        "video",
+        p.system,
+        [
+          { type: "text", text: p.user },
+          { type: "video_url", video_url: { url } },
+        ],
+        VIDEO_MAX_TOKENS,
+        candidateId,
+      );
+    } catch (err) {
+      if (!(err instanceof Truncated)) throw err;
+      text = err.text;
+    }
+    if (wordCount(text) >= MIN_SOURCE_WORDS) {
+      mkdirSync(join(deps.draftsDir, ".video"), { recursive: true });
+      writeFileSync(path, text);
+    }
+    return text;
+  };
+}
+
 /** Статус unreadable: что пробовали и куда автору положить текст. Журнал и повтор — в pipeline.ts. */
 function markUnreadable(deps: DraftDeps, row: Candidate, words: number, tried: string): void {
   const where = deps.manualDir ? manualPath(deps.manualDir, row.id) : "ручной файл";
@@ -83,7 +130,7 @@ function markUnreadable(deps: DraftDeps, row: Candidate, words: number, tried: s
  * Текста нет — файл не меняется, возвращается то, что пробовали.
  */
 export async function refreshSource(
-  deps: Pick<DraftDeps, "manualDir" | "getHtml">,
+  deps: Pick<DraftDeps, "manualDir" | "getHtml"> & { video?: (url: string) => Promise<string> },
   row: Pick<Candidate, "id" | "url" | "summary" | "body">,
   dir: string,
   slug: string,
@@ -119,7 +166,7 @@ export async function writeDraft(deps: DraftDeps, row: Candidate): Promise<strin
     research = cached;
   } else {
     const fetcher = createFetcher(cfg.select.maxFetches, deps.getHtml);
-    const read = await readSource(row, deps);
+    const read = await readSource(row, { ...deps, video: videoReader(deps, row.id) });
     fetcher.log.push(...read.log);
     if (read.text === null) {
       markUnreadable(deps, row, read.words, formatLog(read.log).replace(/\n/g, " "));

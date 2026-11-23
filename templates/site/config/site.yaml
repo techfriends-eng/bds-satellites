@@ -30,6 +30,8 @@ llm:
     review: anthropic/claude-sonnet-5.5
     revise: anthropic/claude-sonnet-5.5
     image: google/gemini-2.5-flash-image
+    # Видео YouTube по ссылке, только OpenRouter (Gemini смотрит звук и экран).
+    video: google/gemini-2.5-flash
   # У Claude 5 работает только effort (handbook gotchas/llm.md#claude5-reasoning).
   reasoning:
     select: { effort: low }

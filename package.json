@@ -1,6 +1,6 @@
 {
   "name": "bds-satellites",
-  "version": "0.1.54",
+  "version": "0.1.55",
   "private": true,
   "type": "module",
   "engines": {
@@ -21,7 +21,7 @@
     "prepare": "npm run build"
   },
   "dependencies": {
-    "@techfriends-eng/toolkit": "github:techfriends-eng/toolkit#v0.14.0",
+    "@techfriends-eng/toolkit": "github:techfriends-eng/toolkit#feat/chat-content-parts",
     "pg": "8.13.1",
     "yaml": "2.6.1"
   },

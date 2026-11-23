@@ -4,11 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parseSiteConfig } from "../config/site.ts";
+import type { ChatContentPart } from "@techfriends-eng/toolkit/llm";
 import type { Llm, Stage } from "../llm/client.ts";
 import { createFetcher, docUrlAllowed } from "../research/fetcher.ts";
 import { openState } from "../store/db.ts";
 import { loadStyle } from "../style/rules.ts";
-import { writeDraft } from "./draft.ts";
+import { videoReader, writeDraft } from "./draft.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..");
 const cfg = parseSiteConfig(
@@ -17,7 +18,7 @@ const cfg = parseSiteConfig(
 const LONG = `<html><body><article><p>${"Kafka KRaft контроллеры и кворум. ".repeat(80)}</p></article></body></html>`;
 
 function fakeLlm(answers: Partial<Record<Stage, string>>) {
-  const asked: { stage: Stage; system: string; user: string }[] = [];
+  const asked: { stage: Stage; system: string; user: string | ChatContentPart[] }[] = [];
   const llm: Llm = {
     spent: () => 0,
     exhausted: () => false,
@@ -286,4 +287,50 @@ test("черновик: план в кэше построен по анонсу 
     db.prepare("SELECT * FROM candidates WHERE id = 13").get() as never,
   );
   assert.equal(asked[0].stage, "plan");
+});
+
+test("черновик по видео YouTube: модель video получает ссылку частью сообщения, текст идёт в план", async () => {
+  const db = seed();
+  db.prepare(
+    "UPDATE candidates SET url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' WHERE id = 13",
+  ).run();
+  const dir = mkdtempSync(join(tmpdir(), "sat-"));
+  const said = "Kafka KRaft контроллеры и кворум. ".repeat(80);
+  const { llm, asked } = fakeLlm({ video: said, plan: '{"verdict": "skip", "why": "нет"}' });
+  await writeDraft(
+    {
+      db,
+      cfg,
+      llm,
+      style: loadStyle(join(ROOT, "style")),
+      promptDirs: [join(ROOT, "prompts")],
+      draftsDir: dir,
+      getHtml: async (u) => assert.fail(`запрос ${u}`),
+    },
+    db.prepare("SELECT * FROM candidates WHERE id = 13").get() as never,
+  );
+  assert.deepEqual(
+    asked.map((a) => a.stage),
+    ["video", "plan"],
+  );
+  assert.deepEqual((asked[0].user as ChatContentPart[])[1], {
+    type: "video_url",
+    video_url: { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" },
+  });
+  assert.ok((asked[1].user as string).includes("KRaft контроллеры"));
+  assert.equal(readFileSync(join(dir, ".video", "dQw4w9WgXcQ.md"), "utf8"), said);
+});
+
+test("видео: текст из кэша за второй раз не платим; короткий ответ не кэшируется", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "sat-"));
+  const deps = { cfg, promptDirs: [join(ROOT, "prompts")], draftsDir: dir };
+  const url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+  const short = fakeLlm({ video: "мало слов" });
+  await videoReader({ ...deps, llm: short.llm }, 13)(url);
+  assert.equal(existsSync(join(dir, ".video", "dQw4w9WgXcQ.md")), false);
+  const full = fakeLlm({ video: "слово ".repeat(400) });
+  const read = videoReader({ ...deps, llm: full.llm }, 13);
+  await read(url);
+  await read(url);
+  assert.equal(full.asked.length, 1);
 });
