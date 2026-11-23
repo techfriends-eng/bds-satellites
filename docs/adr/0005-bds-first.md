@@ -39,7 +39,7 @@
 - bds-satellites 0.1.56: миграция `sat.bds_offers` (роль `sat_writer` — insert/select, роль Stack Radar —
   select/update по status и decided_at), статус кандидата `bds_offer`, шаг сверки решений в начале прогона,
   ключи `select.bdsMinRelevance`/`bdsMinDepth`, CHANGELOG, RUNBOOK §5, templates/site.
-- stack-radar: трек `longread` (тема чата `PICK_LONGREAD_THREAD_ID`, срок `PICK_LONGREAD_EXPIRE_HOURS` = 168),
+- stack-radar: трек `longread` (тема «longreadBDS» служебного чата -1004445665712, `PICK_LONGREAD_THREAD_ID=1942`, срок `PICK_LONGREAD_EXPIRE_HOURS` = 168),
   кнопки и обработка callback, RUNBOOK §8–9.
 - Порядок выката: Stack Radar с треком (пустая таблица — карточек нет) → bds-satellites 0.1.56 на сайты.
 
