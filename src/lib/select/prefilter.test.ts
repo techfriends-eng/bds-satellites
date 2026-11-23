@@ -151,8 +151,13 @@ select: {keywords: [kafka]}
     v("a6", "Fiverr Webinar recording"),
     v("a7", "Kafka Night Moscow"),
     v("a8", "Митап Kafka в Москве"),
+    v("a9", "Iceberg Index Support Sync   2026 11 09"),
+    v("a10", "Efficient column updates sync Oct 6 2026"),
+    v("a11", "Session 4"),
+    v("a12", "Iceberg Community Sync 10 7 2026"),
+    v("ok2", "Kafka sync vs async replication in 2026"),
     v("ok", "The traps of migrating Kafka from Zookeeper to KRaft"),
   ]);
   const counts = prefilter(db, yt, new Date("2026-10-28T00:00:00Z"));
-  assert.deepEqual(counts, { shorts: 1, org_video: 8, pass: 1 });
+  assert.deepEqual(counts, { shorts: 1, org_video: 12, pass: 2 });
 });

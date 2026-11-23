@@ -26,6 +26,10 @@ export const ORG_VIDEO = new RegExp(
     "\\bsummit (?:recap|highlights|trailer|opening|closing|announcement)",
     "\\bcommunity (?:sync|call|broadcast|update|meeting)",
     "\\bcontributors? (?:call|sync|meeting)",
+    // Рабочие созвоны с датой: «Iceberg Index Support Sync 2026 11 09», «column updates sync Oct 6 2026».
+    "\\bsync\\s+(?:\\d|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\s+\\d)",
+    // Безымянные куски трансляции: «Session 4».
+    "^session \\d+$",
     "\\boffice hours\\b",
     "\\btown ?hall\\b",
     "\\bdemo day\\b",
