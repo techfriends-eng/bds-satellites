@@ -21,7 +21,13 @@ import {
   slugOf,
   type GateDeps,
 } from "./gates/run.ts";
-import { refreshSource, videoReader, writeDraft, type Candidate } from "./generate/draft.ts";
+import {
+  MEDIUM_PAYWALL,
+  refreshSource,
+  videoReader,
+  writeDraft,
+  type Candidate,
+} from "./generate/draft.ts";
 import { createJournal, type Journal, type Query } from "./journal/journal.ts";
 import { createClaudeCli } from "./llm/claude-cli.ts";
 import {
@@ -33,7 +39,7 @@ import {
   weekSpent,
 } from "./llm/client.ts";
 import { postGone, publishDraft, trashPost, unschedulePost } from "./publish/wp.ts";
-import { manualPath } from "./research/source.ts";
+import { manualPath, mediumFeedUrl } from "./research/source.ts";
 import { pick, score } from "./select/rank.ts";
 import { prefilter } from "./select/prefilter.ts";
 import { adopt } from "./sources/adopt.ts";
@@ -416,13 +422,19 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
     const { db, cfg, journal, manualDir } = ctx;
     const status = db.prepare("UPDATE candidates SET status = 'picked' WHERE id = ?");
     // Автор положил текст: кандидат возвращается в работу.
-    const waiting = db.prepare("SELECT id FROM candidates WHERE status = 'unreadable'").all() as {
-      id: number;
-    }[];
-    for (const { id } of waiting) {
+    const waiting = db
+      .prepare("SELECT id, url FROM candidates WHERE status = 'unreadable'")
+      .all() as { id: number; url: string }[];
+    const paywall = db.prepare(
+      `UPDATE candidates SET status = 'skip', skip_reason = '${MEDIUM_PAYWALL}' WHERE id = ?`,
+    );
+    for (const { id, url } of waiting) {
       if (existsSync(manualPath(manualDir, id))) status.run(id);
+      // Ждавшие текст статьи Medium до 0.1.57: автор их не носит.
+      else if (mediumFeedUrl(url)) paywall.run(id);
     }
     const needText: { id: number; url: string; file: string }[] = [];
+    const paywalled: number[] = [];
     const tried = new Set<number>();
     for (;;) {
       const rows = (
@@ -459,13 +471,22 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
         if (now.status === "unreadable") {
           unreadable++;
           needText.push({ id: row.id, url: row.url, file: manualPath(manualDir, row.id) });
+        } else if (now.status === "skip") {
+          unreadable++; // платная статья Medium: замена без просьбы к автору
+          paywalled.push(row.id);
         }
       }
       // Вместо нечитаемого — следующий кандидат. Без замены прогон остался бы без статьи.
-      if (!unreadable || ctx.ids?.length || needText.length >= MAX_UNREADABLE_PER_RUN) break;
+      if (
+        !unreadable ||
+        ctx.ids?.length ||
+        needText.length + paywalled.length >= MAX_UNREADABLE_PER_RUN
+      )
+        break;
       if (!pick(db, cfg).length) break;
     }
     if (needText.length) journal.stats.need_author_text = needText;
+    if (paywalled.length) journal.stats.medium_paywall = paywalled;
   },
   async stand(ctx) {
     for (const d of drafts(ctx.db, ["drafted"], ctx.ids)) {

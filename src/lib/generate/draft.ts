@@ -8,6 +8,7 @@ import { docsForPlan } from "../docs/search.ts";
 import { createFetcher, docUrlAllowed, formatLog, type GetHtml } from "../research/fetcher.ts";
 import {
   manualPath,
+  mediumFeedUrl,
   MIN_SOURCE_WORDS,
   readSource,
   wordCount,
@@ -117,8 +118,22 @@ export function videoReader(
   };
 }
 
-/** Статус unreadable: что пробовали и куда автору положить текст. Журнал и повтор — в pipeline.ts. */
+/** Причина пропуска платной статьи Medium: текста нет ни в ленте, ни на странице, автор его не носит. */
+export const MEDIUM_PAYWALL = "medium_paywall";
+
+/**
+ * Статус unreadable: что пробовали и куда автору положить текст. Журнал и повтор — в pipeline.ts.
+ * Medium — сразу skip: в лентах у платной (member-only) статьи только первые 20–30 слов, страница
+ * роботу закрыта, а носить тексты руками автор не будет (решение 2026-11-23). Вместо неё берётся
+ * следующий кандидат.
+ */
 function markUnreadable(deps: DraftDeps, row: Candidate, words: number, tried: string): void {
+  if (mediumFeedUrl(row.url)) {
+    deps.db
+      .prepare("UPDATE candidates SET status = 'skip', skip_reason = ? WHERE id = ?")
+      .run(`${MEDIUM_PAYWALL}: ${words} слов; ${tried}`.slice(0, 500), row.id);
+    return;
+  }
   const where = deps.manualDir ? manualPath(deps.manualDir, row.id) : "ручной файл";
   deps.db
     .prepare("UPDATE candidates SET status = 'unreadable', skip_reason = ? WHERE id = ?")
