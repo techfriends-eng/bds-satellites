@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { jinaText } from "./fetcher.ts";
-import { mediumFeedUrl, readSource, SOURCE_LIMIT } from "./source.ts";
+import { mediumFeedUrl, readSource, SOURCE_LIMIT, youtubeId } from "./source.ts";
 
 const WORDS = "Kafka KRaft кворум контроллер метаданные ".repeat(70);
 const page = `<html><body><article><p>${WORDS}</p></article></body></html>`;
@@ -83,4 +83,48 @@ test("чтение: длинная статья с прямого запроса
     getHtml: async () => html,
   });
   assert.equal(r.text?.length, SOURCE_LIMIT);
+});
+
+test("id видео YouTube: watch, youtu.be, shorts, live, m.; чужой адрес и канал — нет", () => {
+  assert.equal(youtubeId("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10"), "dQw4w9WgXcQ");
+  assert.equal(youtubeId("https://youtu.be/dQw4w9WgXcQ?si=x"), "dQw4w9WgXcQ");
+  assert.equal(youtubeId("https://m.youtube.com/shorts/dQw4w9WgXcQ"), "dQw4w9WgXcQ");
+  assert.equal(youtubeId("https://youtube.com/live/dQw4w9WgXcQ"), "dQw4w9WgXcQ");
+  assert.equal(youtubeId("https://www.youtube.com/@confluent"), null);
+  assert.equal(youtubeId("https://site.io/watch?v=dQw4w9WgXcQ"), null);
+});
+
+const YT = "https://youtu.be/dQw4w9WgXcQ";
+
+test("чтение видео: текст по видео, страницу и r.jina.ai не трогаем", async () => {
+  const seen: string[] = [];
+  const r = await readSource(row({ url: YT, body: "анонс" }), {
+    getHtml: async (u) => {
+      seen.push(u);
+      return page;
+    },
+    video: async (u) => {
+      seen.push(u);
+      return WORDS;
+    },
+  });
+  assert.equal(r.via, "видео");
+  assert.deepEqual(seen, ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"]);
+});
+
+test("чтение видео: модель упала или мало слов — лента, иначе нет текста; в сеть не ходим", async () => {
+  const getHtml = async (u: string): Promise<string> => assert.fail(`запрос ${u}`);
+  const down = await readSource(row({ url: YT, body: WORDS }), {
+    getHtml,
+    video: async () => Promise.reject(new Error("HTTP 400")),
+  });
+  assert.equal(down.via, "лента");
+  assert.ok(down.log.some((l) => l.url === "видео" && /400/.test(l.result)));
+  const short = await readSource(row({ url: YT, body: "анонс" }), {
+    getHtml,
+    video: async () => "мало",
+  });
+  assert.equal(short.text, null);
+  const noVideo = await readSource(row({ url: YT, body: "анонс" }), { getHtml });
+  assert.equal(noVideo.text, null);
 });

@@ -5,14 +5,20 @@ import { JINA, jinaText, type FetchLogEntry, type GetHtml } from "./fetcher.ts";
 
 /**
  * Текст исходника. Цепочка: ручной файл автора → лента → авторская лента Medium → прямой запрос →
- * r.jina.ai. Берём первый текст от MIN_SOURCE_WORDS слов. Меньше — статус unreadable: статья по анонсу
+ * r.jina.ai. У видео YouTube: ручной файл → пересказ видео моделью (`deps.video`) → лента; страница
+ * и r.jina.ai не пробуются: YouTube серверам в AWS отвечает бот-проверкой, r.jina.ai — 401. Берём первый текст от MIN_SOURCE_WORDS слов. Меньше — статус unreadable: статья по анонсу
  * из ленты выходит пересказом заголовка (#9197 — 24 слова, #9167 — 18, #9170 — 30).
  */
 export const SOURCE_LIMIT = 40_000;
 export const MIN_SOURCE_WORDS = 300;
 
 export type SourceRow = { id: number; url: string; summary: string; body?: string };
-export type SourceDeps = { manualDir?: string; getHtml: GetHtml };
+export type SourceDeps = {
+  manualDir?: string;
+  getHtml: GetHtml;
+  /** Пересказ видео YouTube близко к тексту; нет — видео читается только по ленте. */
+  video?: (url: string) => Promise<string>;
+};
 export type SourceResult = {
   text: string | null;
   via: string | null;
@@ -43,6 +49,26 @@ export function mediumFeedUrl(url: string): string | null {
     return first ? `https://medium.com/feed/${first}` : null;
   }
   return host.endsWith(".medium.com") ? `https://${host}/feed` : null;
+}
+
+/** id видео YouTube или null, если адрес не видео YouTube. */
+export function youtubeId(url: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  const host = u.hostname.toLowerCase().replace(/^(www|m)\./, "");
+  const id =
+    host === "youtu.be"
+      ? u.pathname.split("/").filter(Boolean)[0]
+      : host === "youtube.com"
+        ? (u.searchParams.get("v") ??
+          u.pathname.match(/^\/(?:shorts|live|embed)\/([^/]+)/)?.[1] ??
+          null)
+        : null;
+  return id && /^[\w-]{6,}$/.test(id) ? id : null;
 }
 
 /** У статьи Medium адрес бывает разным, постоянен шестнадцатеричный хвост. */
@@ -80,6 +106,20 @@ export async function readSource(row: SourceRow, deps: SourceDeps): Promise<Sour
       const ok = accept("ручной файл", readFileSync(path, "utf8"));
       if (ok) return ok;
     }
+  }
+
+  const videoId = youtubeId(row.url);
+  if (videoId) {
+    if (deps.video) {
+      try {
+        const ok = accept("видео", await deps.video(`https://www.youtube.com/watch?v=${videoId}`));
+        if (ok) return ok;
+      } catch (err) {
+        failed("видео", err);
+      }
+    }
+    const ok = accept("лента", stripHtml(row.body || row.summary));
+    return ok ?? { text: null, via: null, words: best, log };
   }
 
   const feed = accept("лента", stripHtml(row.body || row.summary));

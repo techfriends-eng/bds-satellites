@@ -44,7 +44,7 @@ export type SiteConfig = {
   llm: {
     /** Список моделей этапа с откатом по порядку (ADR 0002); в YAML можно строкой — список из одной. */
     models: Record<
-      "select" | "plan" | "write" | "fix" | "review" | "revise" | "align" | "image",
+      "select" | "plan" | "write" | "fix" | "review" | "revise" | "align" | "image" | "video",
       string[]
     >;
     reasoning: Partial<Record<string, Record<string, unknown>>>;
@@ -84,6 +84,9 @@ export type SiteConfig = {
   schedule: { day: string };
   bdsBase: string;
 };
+
+/** Пересказ видео YouTube по ссылке: OpenRouter передаёт её Gemini в Google AI Studio. */
+export const DEFAULT_VIDEO_MODELS = ["google/gemini-2.5-flash"];
 
 const YOUTUBE_FEED = "https://www.youtube.com/feeds/videos.xml?channel_id=";
 
@@ -144,13 +147,15 @@ function parseLlm(raw: Raw): SiteConfig["llm"] {
     if (!list.length) throw new Error(`llm.models.${stage}: пустой список`);
     for (const m of list) {
       const spec = parseModel(m);
-      if (stage === "image" && spec.provider !== "openrouter")
-        throw new Error(`llm.models.image: только OpenRouter (${m})`);
+      if ((stage === "image" || stage === "video") && spec.provider !== "openrouter")
+        throw new Error(`llm.models.${stage}: только OpenRouter (${m})`);
     }
     models[stage] = list;
   }
   // align (ADR 0003) без своей строки в конфиге идёт той же парой моделей и тем же effort, что revise.
   if (!models.align && models.revise) models.align = models.revise;
+  // Видео YouTube читает Gemini по ссылке: сам YouTube серверам в AWS субтитров не отдаёт (бот-проверка).
+  if (!models.video) models.video = [...DEFAULT_VIDEO_MODELS];
   const reasoning: Partial<Record<string, Record<string, unknown>>> = { ...llm.reasoning };
   if (!reasoning.align && reasoning.revise) reasoning.align = reasoning.revise;
   return {

@@ -20,7 +20,7 @@ import {
   slugOf,
   type GateDeps,
 } from "./gates/run.ts";
-import { refreshSource, writeDraft, type Candidate } from "./generate/draft.ts";
+import { refreshSource, videoReader, writeDraft, type Candidate } from "./generate/draft.ts";
 import { createJournal, type Journal, type Query } from "./journal/journal.ts";
 import { createClaudeCli } from "./llm/claude-cli.ts";
 import {
@@ -586,7 +586,11 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
       try {
         const cand = row.get(d.candidate_id) as Candidate;
         const src = await refreshSource(
-          { manualDir: ctx.manualDir, getHtml: (u) => fetchText(u, 60_000, 2_000_000) },
+          {
+            manualDir: ctx.manualDir,
+            getHtml: (u) => fetchText(u, 60_000, 2_000_000),
+            video: videoReader({ ...ctx.gateDeps, draftsDir: ctx.draftsDir }, d.candidate_id),
+          },
           cand,
           d.dir,
           slug,
