@@ -22,6 +22,7 @@ function fakeLlm(answers: Partial<Record<Stage, string>>) {
   const llm: Llm = {
     spent: () => 0,
     exhausted: () => false,
+    ceiling: () => null,
     charge: () => {},
     flush: async () => {},
     ask: async (stage, system, user) => {
@@ -219,6 +220,7 @@ test("черновик: write упал — следующий прогон бе�
   const failing: Llm = {
     spent: () => 0,
     exhausted: () => false,
+    ceiling: () => null,
     charge: () => {},
     flush: async () => {},
     ask: async (stage) => {

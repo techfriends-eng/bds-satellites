@@ -34,6 +34,7 @@ import {
   BudgetExceeded,
   createLlm,
   OPENROUTER,
+  OPENROUTER_THROW_ON,
   parseModel,
   TIMER_COMMANDS,
   weekSpent,
@@ -566,7 +567,7 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
             ctx,
             "превью",
             d.candidate_id,
-            new Error("потолок прогона, ждёт следующий прогон"),
+            new Error(`${llm.ceiling() ?? "потолок прогона"}, ждёт следующий прогон`),
           );
           continue;
         }
@@ -863,7 +864,11 @@ export async function main(argv: string[]): Promise<number> {
   const llm = createLlm(
     db,
     cfg,
-    createChat({ baseUrl: OPENROUTER, apiKey: optionalSecret("OPENROUTER_API_KEY") ?? "" }),
+    createChat({
+      baseUrl: OPENROUTER,
+      apiKey: optionalSecret("OPENROUTER_API_KEY") ?? "",
+      throwOn: OPENROUTER_THROW_ON,
+    }),
     // Общий журнал расхода llm.calls на supan8n; DSN нет — выключен (bds-content ADR 0001, шаг 5c).
     createLedger({
       project: "bds-satellites",
