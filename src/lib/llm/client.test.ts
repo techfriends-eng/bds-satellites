@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  ChatHttpError,
   createLedger,
   type ChatClient,
   type ChatRequest,
@@ -285,6 +286,67 @@ test("откат: сбой claude-cli — дальше; все упали — п
   await assert.rejects(llm.ask("review", "s", "u", 100), /не ответила после повторов/);
   const noCli = createLlm(db, multi, fakeChat([{ text: "без cli" }]).chat);
   assert.equal(await noCli.ask("review", "s", "u", 100), "без cli");
+});
+
+/** Чат: по коду на вызов — ошибка ChatHttpError, null — ответ «ok». */
+function httpChat(steps: (number | null)[]) {
+  const seen: string[] = [];
+  const chat = {
+    complete: async () => null,
+    completeDetailed: async (req: ChatRequest) => {
+      seen.push(req.model);
+      const code = steps.shift();
+      if (code) throw new ChatHttpError(code, `error ${code}`);
+      return {
+        text: "ok",
+        model: req.model,
+        finishReason: "stop",
+        usage: { promptTokens: 1, completionTokens: 2, reasoningTokens: 0, costUsd: 0.01 },
+      };
+    },
+  } satisfies ChatClient;
+  return { chat, seen };
+}
+
+test("402 OpenRouter: потолок с причиной, OpenRouter больше не зовётся, запасные модели тоже", async () => {
+  const db = openState(":memory:");
+  const { chat, seen } = httpChat([402]);
+  const llm = createLlm(db, multi, chat, undefined, fakeCli({ ok: false, why: "занято" }).cli);
+  assert.equal(llm.exhausted(), false);
+  assert.equal(llm.ceiling(), null);
+  await assert.rejects(
+    llm.ask("review", "s", "u", 100),
+    (e: Error) =>
+      e instanceof BudgetExceeded &&
+      /OpenRouter: нет кредитов \(HTTP 402: error 402\)/.test(e.message),
+  );
+  assert.deepEqual(seen, ["m-sonnet"], "m-backup — тоже OpenRouter, не вызывается");
+  assert.equal(llm.exhausted(), true);
+  assert.match(llm.ceiling() ?? "", /нет кредитов/);
+  await assert.rejects(llm.ask("write", "s", "u", 100), BudgetExceeded);
+  assert.equal(seen.length, 1);
+  const calls = db.prepare("SELECT count(*) AS n FROM llm_calls").get() as { n: number };
+  assert.equal(calls.n, 0);
+});
+
+test("402 OpenRouter: подписка claude-cli после него работает", async () => {
+  const db = openState(":memory:");
+  const { chat, seen } = httpChat([402]);
+  const { cli, asks } = fakeCli({ ok: true, why: "" });
+  const llm = createLlm(db, multi, chat, undefined, cli);
+  await assert.rejects(llm.ask("write", "s", "u", 100), BudgetExceeded);
+  assert.equal(await llm.ask("review", "s", "u", 100), "по подписке");
+  assert.equal(asks.length, 1);
+  assert.deepEqual(seen, ["m-sonnet"]);
+});
+
+test("401/403 — не баланс: обычный откат на следующую модель", async () => {
+  const db = openState(":memory:");
+  const { chat, seen } = httpChat([401, null]);
+  const llm = createLlm(db, multi, chat, undefined, fakeCli({ ok: false, why: "занято" }).cli);
+  assert.equal(await llm.ask("review", "s", "u", 100), "ok");
+  assert.deepEqual(seen, ["m-sonnet", "m-backup"]);
+  assert.equal(llm.exhausted(), false);
 });
 
 test("откат: обрезанный ответ не откатывается", async () => {

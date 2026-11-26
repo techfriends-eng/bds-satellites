@@ -1,3 +1,4 @@
+import { ChatHttpError } from "@techfriends-eng/toolkit/llm";
 import type { ChatClient, ChatContentPart, Ledger } from "@techfriends-eng/toolkit/llm";
 import type { SiteConfig } from "../config/site.ts";
 import { nowIso, type Db } from "../store/db.ts";
@@ -13,8 +14,16 @@ import type { ClaudeCli } from "./claude-cli.ts";
  * У этапа — список моделей с откатом (ADR 0002, п. 2): `openrouter:<id>` (или просто id) и
  * `claude-cli:<alias>` (подписка, см. claude-cli.ts). Модель не ответила, упала или подписка занята —
  * берётся следующая. Обрезанный ответ и потолок прогона не откатываются: это не сбой модели.
+ *
+ * 402 OpenRouter — кончился баланс (24–26.11: «модель не ответила после повторов» шесть тактов подряд у
+ * kafka и python). До конца процесса OpenRouter не вызывается: модели `claude-cli:` в списке этапа ещё
+ * работают, остальное — `BudgetExceeded`, как потолок: платные шаги стоят, готовое уходит в WP.
+ * Чат должен быть создан с `throwOn: [401, 402, 403]` (`OPENROUTER_THROW_ON`).
  */
 export const OPENROUTER = "https://openrouter.ai/api/v1";
+
+/** Коды OpenRouter, на которых toolkit/llm бросает `ChatHttpError`: ключ (401, 403) и баланс (402). */
+export const OPENROUTER_THROW_ON = [401, 402, 403] as const;
 
 export type Stage = keyof SiteConfig["llm"]["models"];
 
@@ -49,8 +58,10 @@ export type Llm = {
     candidateId?: number,
   ): Promise<string>;
   spent(): number;
-  /** Потолок прогона или недели исчерпан: платные вызовы дальше не делаются. */
+  /** Потолок прогона или недели исчерпан либо у OpenRouter нет кредитов: платные вызовы дальше не делаются. */
   exhausted(): boolean;
+  /** Причина остановки платных вызовов для журнала; null — не остановлены. */
+  ceiling(): string | null;
   /** Расход вне ask (картинки): в журнал llm_calls и в потолок прогона. ok=false — оплачено, но не годно. */
   charge(stage: Stage, model: string, costUsd: number, candidateId?: number, ok?: boolean): void;
   /** Дождаться записей в общий журнал (перед выходом процесса). */
@@ -87,6 +98,8 @@ export function createLlm(
   command: string | null = null,
 ): Llm {
   let spent = 0;
+  /** Ответ OpenRouter 402 в этом процессе: баланс кончился, дальше только `claude-cli:`. */
+  let noCredits: string | null = null;
   const over = (): string | null => {
     const { maxCostPerRunUsd: run, maxCostPerWeekUsd: week } = cfg.llm;
     if (spent >= run) return `потолок прогона $${run} исчерпан ($${spent.toFixed(3)})`;
@@ -126,7 +139,8 @@ export function createLlm(
   };
   return {
     spent: () => spent,
-    exhausted: () => over() !== null,
+    exhausted: () => over() !== null || noCredits !== null,
+    ceiling: () => over() ?? noCredits,
     async flush() {
       await Promise.all(pending.splice(0));
     },
@@ -151,13 +165,18 @@ export function createLlm(
           const m = parseModel(spec);
           if (m.provider === "claude-cli")
             return await viaCli(m.id, stage, system, user, candidateId, variant);
+          if (noCredits) continue;
           return await viaOpenRouter(m.id, stage, system, user, maxTokens, candidateId, variant);
         } catch (err) {
           if (err instanceof Truncated || err instanceof BudgetExceeded) throw err;
+          if (err instanceof ChatHttpError && err.status === 402) {
+            noCredits = `OpenRouter: нет кредитов (${err.message})`.slice(0, 300);
+          }
           lastErr = err as Error;
           console.error(`${stage}: ${spec} — ${lastErr.message}${next}`);
         }
       }
+      if (noCredits) throw new BudgetExceeded(noCredits);
       throw lastErr ?? new Error(`${stage}: ни одна модель не ответила`);
     },
   };

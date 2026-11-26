@@ -86,6 +86,7 @@ test("прогон: упал → починка через LLM меняет ко
   const llm: Llm = {
     spent: () => 0,
     exhausted: () => false,
+    ceiling: () => null,
     charge: () => {},
     flush: async () => {},
     ask: async (stage, _s, user) => {
@@ -120,6 +121,7 @@ test("прогон: починки кончились — run_failed, вывод
   const llm: Llm = {
     spent: () => 0,
     exhausted: () => false,
+    ceiling: () => null,
     charge: () => {},
     flush: async () => {},
     ask: async () => '{"cause": "?", "files": {}}',

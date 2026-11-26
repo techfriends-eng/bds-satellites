@@ -84,6 +84,7 @@ function deps(db: ReturnType<typeof openState>, answers: Partial<Record<Stage, s
   const llm: Llm = {
     spent: () => 0,
     exhausted: () => false,
+    ceiling: () => null,
     charge: () => {},
     flush: async () => {},
     ask: async (stage) => answers[stage] ?? "",
@@ -236,6 +237,7 @@ test("доводка: стенд с прошлого раза не прошёл 
   d.llm = {
     spent: () => 0,
     exhausted: () => false,
+    ceiling: () => null,
     charge: () => {},
     flush: async () => {},
     ask: async (stage) => (
@@ -286,6 +288,7 @@ test("переделка: правка идёт и при чистых пров�
   d.llm = {
     spent: () => 0,
     exhausted: () => false,
+    ceiling: () => null,
     charge: () => {},
     flush: async () => {},
     ask: async (stage, _system, user) => {
