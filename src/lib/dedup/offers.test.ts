@@ -3,13 +3,13 @@ import { test } from "node:test";
 import { parseSiteConfig } from "../config/site.ts";
 import { openState } from "../store/db.ts";
 import { urlHash } from "./keys.ts";
-import { OFFER_INSERT_SQL, syncBdsOffers } from "./offers.ts";
+import { BDS_DECLINED, OFFER_INSERT_SQL, syncBdsOffers } from "./offers.ts";
 
 const cfg = parseSiteConfig(`
 site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}
 sources:
   - {id: yt, kind: youtube, channel_id: UC1}
-select: {keywords: [kafka], bdsPerRun: 2}
+select: {keywords: [kafka], bdsPerRun: 2, bdsMinRelevance: 9, bdsMinDepth: 7}
 `);
 
 /** Пул: url, релевантность, глубина, статус. */
@@ -111,13 +111,54 @@ test("сверка решений: approved → radar, rejected/expired/стар
   assert.equal(status(db, "https://y/no"), "new");
 });
 
-test("пороги по умолчанию 9/7, лимит 3", () => {
+test("пороги по умолчанию 8/6 (автор 2026-11-27), лимит 3, режим site", () => {
   const d = parseSiteConfig(`
 site: {id: kafka, domain: kafka-school.ru}\nbrand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}
 sources: []
 select: {keywords: [kafka]}
 `);
-  assert.equal(d.select.bdsMinRelevance, 9);
-  assert.equal(d.select.bdsMinDepth, 7);
+  assert.equal(d.select.bdsMinRelevance, 8);
+  assert.equal(d.select.bdsMinDepth, 6);
   assert.equal(d.select.bdsPerRun, 3);
+  assert.equal(d.mode, "site");
+});
+
+const BRAND =
+  "brand: {primary: '#2F6F73', accent: '#A9CBD4', background: '#F4F8F9', text: '#232C3D'}";
+
+test("mode: offers разбирается, чужое значение — ошибка", () => {
+  const conf = (mode: string) =>
+    `site: {id: bds, domain: bigdataschool.ru}\nmode: ${mode}\n${BRAND}\nselect: {keywords: [airflow]}\n`;
+  assert.equal(parseSiteConfig(conf("offers")).mode, "offers");
+  assert.throws(() => parseSiteConfig(conf("drafts")), /mode: drafts/);
+});
+
+test("режим offers: отказ и срок снимают тему (skip bds_declined), спутнику не возвращают", async () => {
+  const offers = parseSiteConfig(
+    `site: {id: bds, domain: bigdataschool.ru}\nmode: offers\n${BRAND}\nselect: {keywords: [airflow]}\n`,
+  );
+  const db = seed([
+    ["https://y/no", 10, 9, "bds_offer"],
+    ["https://y/late", 10, 9, "bds_offer"],
+    ["https://y/ok", 10, 9, "bds_offer"],
+  ]);
+  const h = urlHash;
+  const sat = fakeSat({
+    [h("https://y/no")]: { status: "rejected", offered_at: "2026-11-20" },
+    [h("https://y/late")]: { status: "expired", offered_at: "2026-11-10" },
+    [h("https://y/ok")]: { status: "approved", offered_at: "2026-11-20" },
+  });
+  const stats = await syncBdsOffers(db, offers, sat.query, new Date("2026-11-23"));
+  assert.deepEqual(stats, { offered: 0, queued: 0, pending: 0, bds: 1, returned: 2 });
+  const row = (url: string) =>
+    db.prepare("SELECT status, skip_reason FROM candidates WHERE url = ?").get(url) as {
+      status: string;
+      skip_reason: string | null;
+    };
+  assert.deepEqual({ ...row("https://y/no") }, { status: "skip", skip_reason: BDS_DECLINED });
+  assert.deepEqual({ ...row("https://y/late") }, { status: "skip", skip_reason: BDS_DECLINED });
+  assert.equal(row("https://y/ok").status, "radar");
+  // Следующая сверка снятое не трогает и заново не предлагает.
+  const again = await syncBdsOffers(db, offers, sat.query, new Date("2026-11-24"));
+  assert.deepEqual(again, { offered: 0, queued: 0, pending: 0, bds: 0, returned: 0 });
 });

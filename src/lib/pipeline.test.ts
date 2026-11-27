@@ -12,6 +12,8 @@ import {
   RUN_STEPS,
   runSteps,
   tickSteps,
+  offerSteps,
+  OFFER_STEPS,
   type Step,
 } from "./pipeline.ts";
 import { openState } from "./store/db.ts";
@@ -306,4 +308,11 @@ test("корзину не дала роль WP: пост из расписани
   assert.deepEqual(unscheduled, [9267]);
   const row = db.prepare("SELECT wp_status FROM drafts").get() as { wp_status: string };
   assert.equal(row.wp_status, "draft");
+});
+
+test("offerSteps: режим offers — только сбор и отбор, каждым тактом", () => {
+  assert.deepEqual(offerSteps("tick"), OFFER_STEPS);
+  assert.deepEqual(offerSteps("run"), ["collect", "select"]);
+  assert.deepEqual(offerSteps("select"), ["select"]);
+  for (const c of ["draft", "publish", "rework", "visuals"]) assert.equal(offerSteps(c), null);
 });

@@ -9,8 +9,11 @@ import type { Db } from "../store/db.ts";
  * `bds_offer`. Карточку с кнопками шлёт Stack Radar (трек «Лонгрид BDS») и пишет решение туда же.
  * Каждый отбор сверяет решения: approved — `radar` (материал у BDS), rejected/expired — `new`
  * (обычный отбор спутника), pending — ждёт. Ключ — url_hash: два спутника с одним материалом дают одно
- * предложение и читают одно решение.
+ * предложение и читают одно решение. В режиме offers (конфиг `bds`, ADR 0005 п. 5) спутника нет:
+ * rejected/expired — `skip` с `skip_reason = bds_declined`.
  */
+
+export const BDS_DECLINED = "bds_declined";
 
 /** Предложение, которое Stack Radar так и не показал, спутник через столько дней забирает сам. */
 export const OFFER_FALLBACK_DAYS = 14;
@@ -68,6 +71,9 @@ export async function syncBdsOffers(
   };
   const known = new Map(res.rows.map((r) => [r.url_hash, r]));
   const setStatus = db.prepare("UPDATE candidates SET status = ? WHERE id = ?");
+  const decline = db.prepare(
+    `UPDATE candidates SET status = 'skip', skip_reason = '${BDS_DECLINED}' WHERE id = ?`,
+  );
   const fallback = now.getTime() - OFFER_FALLBACK_DAYS * 86_400_000;
 
   for (const r of rows) {
@@ -104,8 +110,12 @@ export async function syncBdsOffers(
       if (r.status !== "bds_offer") setStatus.run("bds_offer", r.id);
       stats.pending++;
     } else {
-      // rejected, expired или не показан за OFFER_FALLBACK_DAYS: материал у спутника.
-      if (r.status !== "new") {
+      // rejected, expired или не показан за OFFER_FALLBACK_DAYS: материал у спутника,
+      // в режиме offers спутника нет — тема снята.
+      if (cfg.mode === "offers") {
+        decline.run(r.id);
+        stats.returned++;
+      } else if (r.status !== "new") {
         setStatus.run("new", r.id);
         stats.returned++;
       }

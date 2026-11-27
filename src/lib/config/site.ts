@@ -22,8 +22,16 @@ export type DocsIndex = {
   maxChars: number;
 };
 
+/**
+ * site — спутник целиком (черновики, стенд, WP). offers — только предложения bigdataschool.ru (ADR 0005 п. 5):
+ * сбор, предотбор, отбор, `sat.bds_offers`; без черновиков и WP. Конфиг `bds` — темы BDS без спутника.
+ */
+export const SITE_MODES = ["site", "offers"] as const;
+export type SiteMode = (typeof SITE_MODES)[number];
+
 export type SiteConfig = {
   siteId: string;
+  mode: SiteMode;
   domain: string;
   brand: Brand;
   topics: string[];
@@ -195,6 +203,9 @@ function parseAb(ab: Raw): NonNullable<SiteConfig["llm"]["ab"]> {
 export function parseSiteConfig(text: string): SiteConfig {
   const raw = (parse(text) ?? {}) as Raw;
   if (!raw.site?.id || !raw.site.domain) throw new Error("site.id и site.domain обязательны");
+  const mode = String(raw.mode ?? "site") as SiteMode;
+  if (!SITE_MODES.includes(mode))
+    throw new Error(`mode: ${mode}, нужен ${SITE_MODES.join(" или ")}`);
   const seen = new Set<string>();
   const sources: Source[] = [];
   for (const s of raw.sources ?? []) {
@@ -220,8 +231,8 @@ export function parseSiteConfig(text: string): SiteConfig {
     minRelevance: 7,
     minDepth: 6,
     maxFetches: 4,
-    bdsMinRelevance: 9,
-    bdsMinDepth: 7,
+    bdsMinRelevance: 8,
+    bdsMinDepth: 6,
     bdsPerRun: 3,
   });
   // Пустой список ключей пропустил бы весь пул: это ошибка конфига, а не «без фильтра».
@@ -242,6 +253,7 @@ export function parseSiteConfig(text: string): SiteConfig {
     throw new Error(`publish.lane: при status future нужен 0..${LANES - 1}, у каждого сайта свой`);
   return {
     siteId: raw.site.id,
+    mode,
     domain: raw.site.domain,
     brand: parseBrand(raw.brand),
     topics: (raw.topics as string[] | undefined) ?? [],
