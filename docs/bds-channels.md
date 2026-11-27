@@ -6,10 +6,10 @@ bigdataschool.ru — главный сайт. Лучший материал по
 
 Канал доводит материал до карточки BDS одним из двух путей:
 
-1. **Лента спутника.** Отбор спутника даёт `bds_offer` при `score_relevance >= select.bdsMinRelevance` (9) и
-   `score_depth >= select.bdsMinDepth` (7). Так идут Kafka, Spark, Python, ML и AI.
+1. **Лента спутника.** Отбор спутника даёт `bds_offer` при `score_relevance >= select.bdsMinRelevance` (8) и
+   `score_depth >= select.bdsMinDepth` (6). Так идут Kafka, Spark, Python, ML и AI.
 2. **Конфиг `bds`, режим «только предложения».** Сбор → предотбор → отбор → `sat.bds_offers`, без черновиков и WP.
-   Сюда идут каналы, которых нет ни у одного спутника. Этого режима в коде пока нет, он делается отдельной задачей.
+   Сюда идут каналы, которых нет ни у одного спутника. Режим `mode: offers` есть с 0.1.59.
 
 Один канал в двух местах не держим: `sat.bds_offers` склеит URL, но видео будет смотреть дважды модель этапа video.
 

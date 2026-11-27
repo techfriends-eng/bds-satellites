@@ -88,13 +88,19 @@ supan8n недоступен — план и статья идут без фра
 - База `sat` на auto08: `sat.articles`, `sat.runs`, `sat.bds_offers`. Хаб читает через FDW на supan8n.
 
 Предложения BDS (ADR 0005, с 0.1.56): отбор после оценки отдаёт кандидатов от `select.bdsMinRelevance` /
-`bdsMinDepth` (9/7) в `sat.bds_offers` (статус кандидата `bds_offer`), карточку с кнопками шлёт Stack Radar
+`bdsMinDepth` (8/6 с 0.1.59, было 9/7) в `sat.bds_offers` (статус кандидата `bds_offer`), карточку с кнопками шлёт Stack Radar
 (RUNBOOK stack-radar §8, трек «Лонгрид BDS»). Решения сверяются в начале каждого отбора: `approved` —
 `radar`, `rejected`/`expired` и не показанное за 14 дней — `new`. Счётчики — `sat.runs.stats.bds_offers`
 (`offered`, `queued`, `pending`, `bds`, `returned`), сбой базы — `stats.bds_offers_error` (темы в этот отбор
 не добираются). Таблицу и роль `sat_radar` ставит `ops/bds_offers_setup.sh` (автор, с wsa100). Очередь:
 `sudo -u postgres psql -d sat -c "select id, site, status, score_relevance, score_depth, left(title,60) from sat.bds_offers order by offered_at desc limit 20"`.
 Вернуть предложение спутнику руками: `update sat.bds_offers set status = 'rejected', decided_at = now() where id = …`.
+
+Режим «только предложения» (ADR 0005 п. 5, с 0.1.59): `mode: offers` в `config/site.yaml`. Это конфиг `bds`,
+темы BDS без спутника, каналы в `docs/bds-channels.md`. Каждый такт делает только `collect` и `select`: оценка,
+лучшее в `sat.bds_offers`, без черновиков, стенда и WP. `SAT_DB_URL` обязателен, без него такт падает
+(`sat.runs.error`). Отказ и срок без ответа дают `skip` / `bds_declined`. `draft`, `rework` и прочие команды
+черновика дают код 2. Секреты WP и стенда этому сайту не нужны.
 
 ## 6. Деплой
 

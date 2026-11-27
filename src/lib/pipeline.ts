@@ -107,6 +107,17 @@ export const RUN_STEPS: Step[] = ["visuals", ...STEPS];
 export function tickSteps(newTopics: boolean): Step[] {
   return newTopics ? RUN_STEPS : RUN_STEPS.filter((s) => s !== "collect" && s !== "select");
 }
+/**
+ * Режим offers (ADR 0005 п. 5): только сбор и отбор в `sat.bds_offers`, каждым тактом — предложения BDS не ждут
+ * недели. Шаги черновика и команды над ним в этом режиме — ошибка команды; null — команда не годится.
+ */
+export const OFFER_STEPS: Step[] = ["collect", "select"];
+
+export function offerSteps(command: string): Step[] | null {
+  if (command === "run" || command === "tick") return OFFER_STEPS;
+  if ((OFFER_STEPS as string[]).includes(command)) return [command as Step];
+  return null;
+}
 /** Время последнего выбора тем (ISO UTC) в каталоге состояния: тактам не нужно выбирать темы снова. */
 const SELECTED_AT = "selected-at";
 /** После потолка идут только шаги без платных вызовов: схемы и публикация уже готового. */
@@ -408,14 +419,18 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
     // ADR 0005: лучшие сначала предлагаются BDS. База недоступна — без добора тем: иначе лучшее
     // ушло бы в черновик спутника мимо BDS. Следующий отбор повторит.
     const sat = await pgQuery(optionalSecret("SAT_DB_URL"));
+    // Режиму offers без базы делать нечего: это сбой прогона, а не тихий пропуск.
+    if (!sat && ctx.cfg.mode === "offers") throw new Error("mode offers: нет SAT_DB_URL");
     if (sat) {
       try {
         ctx.journal.stats.bds_offers = await syncBdsOffers(ctx.db, ctx.cfg, sat);
       } catch (err) {
         ctx.journal.stats.bds_offers_error = (err as Error).message.slice(0, 200);
+        if (ctx.cfg.mode === "offers") throw err;
         return;
       }
     }
+    if (ctx.cfg.mode === "offers") return; // черновиков нет: темы не добираются
     ctx.journal.stats.picked = pick(ctx.db, ctx.cfg);
     writeFileSync(join(ctx.stateDir, SELECTED_AT), nowIso());
   },
@@ -844,7 +859,15 @@ export async function main(argv: string[]): Promise<number> {
       (db.prepare("SELECT MAX(scored_at) AS t FROM candidates").get() as { t: string | null }).t ??
       "";
   }
+  const modeSteps = cfg.mode === "offers" && command !== "sync" ? offerSteps(command) : undefined;
+  if (modeSteps === null) {
+    console.error(
+      `sat ${command}: в режиме offers есть только run, tick, sync, note, ${OFFER_STEPS.join(", ")}`,
+    );
+    return 2;
+  }
   const steps: readonly AnyStep[] =
+    modeSteps ??
     draftCommand ??
     (command === "run"
       ? RUN_STEPS
