@@ -16,8 +16,11 @@ check() {
   fi
 }
 
+# mode offers (ADR 0005 п. 5): только сбор и отбор — без Docker, образа визуализации, WP и линтера.
+mode=$(node "$PKG/dist/cli.js" mode 2>/dev/null || echo site)
+echo "mode $mode"
 check "node 22+" node -e 'process.exit(+process.versions.node.split(".")[0] >= 22 ? 0 : 1)'
-check "python3 (линтер)" python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'
+[ "$mode" = offers ] || check "python3 (линтер)" python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'
 # Git-зависимость не двигается в lock сайта вместе с пином пакета: сайты жили на toolkit 0.6.0 при пине v0.6.2.
 check "toolkit той версии, что требует пакет" node -e '
   const { existsSync, readFileSync } = require("node:fs");
@@ -31,9 +34,13 @@ check "toolkit той версии, что требует пакет" node -e '
 TK="$PKG/node_modules/@techfriends-eng/toolkit"
 [ -d "$TK" ] || TK="$PKG/../@techfriends-eng/toolkit"
 check "пин toolkit отстаёт не больше чем на 2 версии" bash "$TK/ops/pin_lag.sh" "$PKG/package.json"
-check "docker доступен" docker info
-check "образ bds-sat-visuals:$(cat "$PKG/VERSION")" docker image inspect "bds-sat-visuals:$(cat "$PKG/VERSION")"
-for v in SAT_SITE_DIR SAT_STATE_DIR OPENROUTER_API_KEY WP_URL WP_USER WP_APP_PASSWORD SAT_DB_URL; do
+need=(SAT_SITE_DIR SAT_STATE_DIR OPENROUTER_API_KEY SAT_DB_URL)
+if [ "$mode" != offers ]; then
+  check "docker доступен" docker info
+  check "образ bds-sat-visuals:$(cat "$PKG/VERSION")" docker image inspect "bds-sat-visuals:$(cat "$PKG/VERSION")"
+  need+=(WP_URL WP_USER WP_APP_PASSWORD)
+fi
+for v in "${need[@]}"; do
   check "$v задан" test -n "${!v:-}"
 done
 if grep -q 'claude-cli:' "${SAT_SITE_DIR:-/nonexistent}/config/site.yaml" 2>/dev/null; then
@@ -47,7 +54,7 @@ check "brand сходится с главной сайта" node "$PKG/dist/cli.
 check "OpenRouter: ключ принят" node -e '
   fetch("https://openrouter.ai/api/v1/key", { headers: { authorization: "Bearer " + process.env.OPENROUTER_API_KEY } })
     .then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))'
-check "WordPress: вход пользователя" node -e '
+[ "$mode" = offers ] || check "WordPress: вход пользователя" node -e '
   const auth = Buffer.from(process.env.WP_USER + ":" + process.env.WP_APP_PASSWORD).toString("base64");
   fetch(process.env.WP_URL + "/wp-json/wp/v2/users/me", { headers: { authorization: "Basic " + auth } })
     .then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))'

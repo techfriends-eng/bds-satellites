@@ -101,6 +101,9 @@ supan8n недоступен — план и статья идут без фра
 лучшее в `sat.bds_offers`, без черновиков, стенда и WP. `SAT_DB_URL` обязателен, без него такт падает
 (`sat.runs.error`). Отказ и срок без ответа дают `skip` / `bds_declined`. `draft`, `rework` и прочие команды
 черновика дают код 2. Секреты WP и стенда этому сайту не нужны.
+С 0.1.60 ему не нужны и Docker, и блок `brand`: `selfcheck.sh` и `deploy-site.sh` смотрят `sat mode` и пропускают
+образ визуализации и WP. Конфиг `bds` живёт в репо `techfriends-eng/bds-offers` на auto08 (cron пользователя ubuntu
+через `runjob.sh`, деплой — `ops_run deploy-bds-offers`), установка и разбор — RUNBOOK того репо.
 
 ## 6. Деплой
 

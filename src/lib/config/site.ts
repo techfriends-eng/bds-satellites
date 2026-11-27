@@ -33,7 +33,8 @@ export type SiteConfig = {
   siteId: string;
   mode: SiteMode;
   domain: string;
-  brand: Brand;
+  /** Палитра схем и превью. null — только в режиме offers без блока brand: там нет ни схем, ни превью. */
+  brand: Brand | null;
   topics: string[];
   courses: Course[];
   sources: Source[];
@@ -255,7 +256,7 @@ export function parseSiteConfig(text: string): SiteConfig {
     siteId: raw.site.id,
     mode,
     domain: raw.site.domain,
-    brand: parseBrand(raw.brand),
+    brand: mode === "offers" && raw.brand === undefined ? null : parseBrand(raw.brand),
     topics: (raw.topics as string[] | undefined) ?? [],
     courses: (raw.courses as Course[] | undefined) ?? [],
     sources,
