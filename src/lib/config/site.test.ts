@@ -36,6 +36,13 @@ test("конфиг: пустые ключи, повтор источника и 
   assert.throws(() => parseSiteConfig(`${YAML}publish: {status: publish}\n`), /draft или future/);
 });
 
+test("brand: в режиме offers не нужен, в режиме site обязателен", () => {
+  const noBrand = YAML.replace(/^brand: .*$/m, "");
+  assert.equal(parseSiteConfig(`${noBrand}mode: offers\n`).brand, null);
+  assert.throws(() => parseSiteConfig(noBrand));
+  assert.notEqual(parseSiteConfig(`${YAML}mode: offers\n`).brand, null);
+});
+
 test("~ раскрывается в дом пользователя", () => {
   assert.equal(
     expandHome("~/.config/sat/x.env", "/home/bds-sat-kafka"),

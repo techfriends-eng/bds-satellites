@@ -557,6 +557,7 @@ const run: Record<AnyStep, (ctx: Ctx) => Promise<void>> = {
     const uid = `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`;
     const apiKey = readSecret("OPENROUTER_API_KEY");
     const { brand } = ctx.cfg;
+    if (!brand) throw new Error("visuals: в конфиге нет brand");
     const base = JSON.parse(
       readFileSync(join(PKG, "visuals", "mermaid_theme_override.json"), "utf8"),
     ) as Record<string, unknown>;
@@ -787,6 +788,10 @@ async function brandCheck(): Promise<number> {
   const cfg = loadSiteConfig(
     join(process.env.SAT_SITE_DIR ?? process.cwd(), "config", "site.yaml"),
   );
+  if (!cfg.brand) {
+    console.log(`brand не задан: mode ${cfg.mode}, схем и превью нет`);
+    return 0;
+  }
   const res = checkBrand(cfg.brand, await fetchSiteColors(cfg.domain));
   console.log(`главная ${cfg.domain}: ${res.site.map((c) => c.hex).join(" ") || "цветов нет"}`);
   for (const p of res.problems) console.error(p);
@@ -797,6 +802,13 @@ export async function main(argv: string[]): Promise<number> {
   const [command = "run", ...rest] = argv;
   if (command === "brand-suggest") return brandSuggest(rest);
   if (command === "brand-check") return brandCheck();
+  if (command === "mode") {
+    // ops-скрипты (selfcheck, deploy-site) решают по нему, нужны ли Docker, образ и WP.
+    console.log(
+      loadSiteConfig(join(process.env.SAT_SITE_DIR ?? process.cwd(), "config", "site.yaml")).mode,
+    );
+    return 0;
+  }
   if (rest.includes("--check-config")) {
     loadSiteConfig(join(process.env.SAT_SITE_DIR ?? process.cwd(), "config", "site.yaml"));
     return 0; // selfcheck: конфиг сайта разбирается
@@ -880,7 +892,7 @@ export async function main(argv: string[]): Promise<number> {
             : []);
   if (!steps.length && command !== "sync") {
     console.error(
-      `sat: неизвестная команда ${command}; есть run, tick, sync, note, adopt, rework, rerender, regate, brand-check, brand-suggest, ${STEPS.join(", ")}`,
+      `sat: неизвестная команда ${command}; есть run, tick, sync, note, adopt, rework, rerender, regate, brand-check, brand-suggest, mode, ${STEPS.join(", ")}`,
     );
     return 2;
   }
